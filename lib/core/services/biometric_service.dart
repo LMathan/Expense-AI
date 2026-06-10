@@ -18,7 +18,7 @@ class BiometricService {
       final can = await canAuthenticate();
       if (!can) return false;
       return await _auth.authenticate(
-        localizedReason: 'Authenticate to access ExpenseAI secure vault',
+        localizedReason: 'Authenticate to access ExpenseMate secure vault',
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: true,

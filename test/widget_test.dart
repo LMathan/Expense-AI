@@ -7,11 +7,11 @@ void main() {
     // Build our app and trigger a frame.
     await tester.pumpWidget(
       const ProviderScope(
-        child: ExpenseAIApp(),
+        child: ExpenseMateApp(),
       ),
     );
 
-    // Verify that the logo name 'ExpenseAI' is visible on startup
-    expect(find.text('ExpenseAI'), findsOneWidget);
+    // Verify that the logo name 'ExpenseMate' is visible on startup
+    expect(find.text('ExpenseMate'), findsOneWidget);
   });
 }

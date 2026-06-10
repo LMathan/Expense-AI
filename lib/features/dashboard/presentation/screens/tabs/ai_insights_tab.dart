@@ -20,7 +20,7 @@ class _AiInsightsTabState extends State<AiInsightsTab> {
     {
       'sender': 'ai',
       'text':
-          'Hi, I am your ExpenseAI Financial Advisor. I have analyzed your transactions database and current budget sheets. Ask me any question like:\n- "Can I afford a ₹15,000 phone?"\n- "Should I buy a bike of ₹1,20,000?"\n- "How much should I save monthly?"',
+          'Hi, I am your ExpenseMate Financial Advisor. I have analyzed your transactions database and current budget sheets. Ask me any question like:\n- "Can I afford a ₹15,000 phone?"\n- "Should I buy a bike of ₹1,20,000?"\n- "How much should I save monthly?"',
     },
   ];
 

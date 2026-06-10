@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:espenseai/core/constants/colors.dart';
 import 'package:espenseai/core/constants/text_styles.dart';
 import 'package:espenseai/core/theme/theme_provider.dart';
@@ -9,11 +9,16 @@ import 'package:espenseai/core/widgets/gradient_progress_bar.dart';
 import 'package:espenseai/features/expense/presentation/providers/expense_provider.dart';
 import 'package:espenseai/features/auth/presentation/providers/auth_provider.dart';
 import 'package:espenseai/features/auth/presentation/screens/login_screen.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import 'package:hive/hive.dart';
 import 'package:espenseai/core/storage/hive_helper.dart';
+import 'package:espenseai/core/services/firestore_sync_service.dart';
+import 'package:espenseai/core/widgets/vector_illustrations.dart';
 
 class ProfileTab extends ConsumerStatefulWidget {
-  const ProfileTab({super.key});
+  final bool showBackButton;
+  const ProfileTab({super.key, this.showBackButton = false});
 
   @override
   ConsumerState<ProfileTab> createState() => _ProfileTabState();
@@ -30,6 +35,172 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
   void initState() {
     super.initState();
     _loadSettings();
+  }
+
+  void _pickProfilePicture({ImageSource source = ImageSource.gallery}) async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: source,
+      maxWidth: 200,
+      maxHeight: 200,
+      imageQuality: 55,
+    );
+    if (picked != null) {
+      final box = Hive.box(HiveHelper.settingsBox);
+      await box.put('profile_picture_path', picked.path);
+      setState(() {});
+      // Upload to Firebase Storage (replaces old file — no extra storage used)
+      FirestoreSyncService().syncProfilePicture(picked.path);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile picture updated!'),
+            backgroundColor: AppColors.emeraldGreen,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showProfilePicOptions(
+      BuildContext context, ImageProvider imageProvider, String? currentPath) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 36),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.cardDark : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 24,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white24 : Colors.black12,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Hero(
+              tag: 'profile_avatar',
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: AppColors.primaryGradient,
+                ),
+                child: CircleAvatar(
+                  radius: 52,
+                  backgroundImage: imageProvider,
+                  backgroundColor:
+                      isDark ? AppColors.cardDark : Colors.grey[200],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            _buildPicOption(
+              context: ctx,
+              icon: Icons.photo_library_rounded,
+              color: AppColors.electricBlue,
+              label: 'Choose from Gallery',
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickProfilePicture(source: ImageSource.gallery);
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildPicOption(
+              context: ctx,
+              icon: Icons.camera_alt_rounded,
+              color: AppColors.emeraldGreen,
+              label: 'Take a Photo',
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickProfilePicture(source: ImageSource.camera);
+              },
+            ),
+            if (currentPath != null) ...[
+              const SizedBox(height: 10),
+              _buildPicOption(
+                context: ctx,
+                icon: Icons.delete_outline_rounded,
+                color: Colors.redAccent,
+                label: 'Remove Photo',
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final box = Hive.box(HiveHelper.settingsBox);
+                  await box.delete('profile_picture_path');
+                  await box.delete('profile_picture_url');
+                  // Delete from Firebase Storage and Firestore
+                  FirestoreSyncService().removeProfilePicture();
+                  setState(() {});
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPicOption({
+    required BuildContext context,
+    required IconData icon,
+    required Color color,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withValues(alpha: 0.15)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 16),
+            Text(
+              label,
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+            const Spacer(),
+            Icon(Icons.arrow_forward_ios_rounded,
+                size: 14,
+                color:
+                    isDark ? Colors.white38 : Colors.black26),
+          ],
+        ),
+      ),
+    );
   }
 
   void _loadSettings() {
@@ -184,6 +355,178 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     );
   }
 
+  void _showEditUsernameDialog(String currentName) {
+    final controller = TextEditingController(text: currentName);
+    final syncService = FirestoreSyncService();
+    
+    bool isChecking = false;
+    bool isTaken = false;
+    bool isValidFormat = true;
+    List<String> suggestions = [];
+    Timer? debounce;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final bgColor = isDark ? AppColors.bgDark : Colors.white;
+        final textColor = isDark ? Colors.white : Colors.black87;
+        final textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+        final cardColor = isDark ? AppColors.cardDark : Colors.grey[100];
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            void onUsernameChanged(String val) {
+              if (debounce?.isActive ?? false) debounce!.cancel();
+              
+              final clean = val.trim();
+              final validFormat = clean.isNotEmpty && RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(clean) && clean.length >= 3;
+              setDialogState(() {
+                isValidFormat = validFormat;
+                isTaken = false;
+                suggestions = [];
+              });
+
+              if (validFormat && clean != currentName) {
+                debounce = Timer(const Duration(milliseconds: 600), () {
+                  setDialogState(() {
+                    isChecking = true;
+                  });
+                  syncService.isUsernameTaken(clean).then((taken) {
+                    setDialogState(() {
+                      isTaken = taken;
+                      isChecking = false;
+                      if (taken) {
+                        final cleanBase = clean.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '').toLowerCase();
+                        final random = DateTime.now().millisecond;
+                        suggestions = [
+                          '${cleanBase}_${100 + (random % 900)}',
+                          '${cleanBase}${10 + (random % 90)}',
+                          '${cleanBase}_${1000 + (random % 9000)}',
+                        ];
+                      }
+                    });
+                  });
+                });
+              }
+            }
+
+            final canSave = controller.text.trim().isNotEmpty && isValidFormat && !isTaken && !isChecking;
+
+            return AlertDialog(
+              backgroundColor: bgColor,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Text('Edit Username', style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: controller,
+                    style: TextStyle(color: textColor),
+                    decoration: InputDecoration(
+                      labelText: 'Username',
+                      labelStyle: TextStyle(color: textSecondary),
+                      prefixIcon: Icon(Icons.person_outline_rounded, color: textSecondary),
+                      suffixIcon: isChecking
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: Padding(
+                                padding: EdgeInsets.all(12),
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.electricBlue),
+                              ),
+                            )
+                          : (controller.text.trim() == currentName
+                              ? null
+                              : (isValidFormat && !isTaken
+                                  ? const Icon(Icons.check_circle_rounded, color: AppColors.emeraldGreen)
+                                  : const Icon(Icons.error_outline_rounded, color: AppColors.accentPink))),
+                    ),
+                    onChanged: onUsernameChanged,
+                  ),
+                  const SizedBox(height: 8),
+                  if (!isValidFormat && controller.text.trim().isNotEmpty)
+                    Text(
+                      'Must be at least 3 characters and alphanumeric (no spaces/symbols)',
+                      style: TextStyle(color: AppColors.accentPink, fontSize: 11),
+                      textAlign: TextAlign.center,
+                    ),
+                  if (isTaken) ...[
+                    Text(
+                      'Username already taken 🛑',
+                      style: TextStyle(color: AppColors.accentPink, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Suggestions:',
+                      style: TextStyle(color: textSecondary, fontSize: 11),
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      children: suggestions.map((sug) {
+                        return ActionChip(
+                          label: Text(sug, style: const TextStyle(fontSize: 11)),
+                          backgroundColor: cardColor,
+                          labelStyle: const TextStyle(color: AppColors.electricBlue, fontWeight: FontWeight.bold),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          onPressed: () {
+                            controller.text = sug;
+                            onUsernameChanged(sug);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    debounce?.cancel();
+                    Navigator.pop(context);
+                  },
+                  child: Text('Cancel', style: TextStyle(color: textSecondary)),
+                ),
+                ElevatedButton(
+                  onPressed: canSave
+                      ? () async {
+                          final newName = controller.text.trim();
+                          if (newName.isNotEmpty) {
+                            debounce?.cancel();
+                            final sBox = Hive.box(HiveHelper.settingsBox);
+                            await sBox.put('user_name', newName);
+                            
+                            await syncService.updateProfileName(newName);
+                            
+                            if (mounted) {
+                              setState(() {});
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Username updated successfully!'),
+                                  backgroundColor: AppColors.emeraldGreen,
+                                ),
+                              );
+                            }
+                          }
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryPurple,
+                    disabledBackgroundColor: AppColors.primaryPurple.withOpacity(0.3),
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _onLogout() async {
     await ref.read(authProvider.notifier).logout();
     if (mounted) {
@@ -205,17 +548,64 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     final sBox = Hive.box(HiveHelper.settingsBox);
     final int xp = sBox.get('user_xp', defaultValue: 0) as int;
     final int level = sBox.get('user_level', defaultValue: 1) as int;
-    final String familyWalletId =
-        sBox.get('family_wallet_id', defaultValue: 'N/A') as String;
+    final String name = sBox.get('user_name', defaultValue: 'User') as String;
+    final String email = sBox.get('user_email', defaultValue: '') as String;
+    final String? profilePicPath = sBox.get('profile_picture_path') as String?;
+    final String? profilePicUrl = sBox.get('profile_picture_url') as String?;
+    final ImageProvider imageProvider;
+    if (profilePicPath != null && !profilePicPath.startsWith('http') && File(profilePicPath).existsSync()) {
+      imageProvider = FileImage(File(profilePicPath));
+    } else if (profilePicPath != null && profilePicPath.startsWith('http')) {
+      imageProvider = NetworkImage(profilePicPath);
+    } else if (profilePicUrl != null) {
+      imageProvider = NetworkImage(profilePicUrl);
+    } else {
+      imageProvider = const NetworkImage('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150');
+    }
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: SafeArea(
+      backgroundColor: isDark ? AppColors.bgDark : AppColors.bgLight,
+      body: AppBackground(
+        type: PageBg.profile,
+        child: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (widget.showBackButton) ...[
+                Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Container(
+                        padding: const EdgeInsets.all(9),
+                        decoration: BoxDecoration(
+                          color: (isDark ? Colors.white : Colors.black)
+                              .withValues(alpha: 0.07),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Profile',
+                      style: TextStyle(
+                        fontFamily: 'Outfit',
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+              ],
               GlassCard(
                 gradientColors: [
                   AppColors.primaryPurple.withValues(alpha: 0.15),
@@ -223,18 +613,67 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                 ],
                 child: Column(
                   children: [
-                    const CircleAvatar(
-                      radius: 36,
-                      backgroundImage: NetworkImage(
-                        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+                    GestureDetector(
+                      onTap: () => _showProfilePicOptions(
+                          context, imageProvider, profilePicPath ?? profilePicUrl),
+                      child: Stack(
+                        children: [
+                          Hero(
+                            tag: 'profile_avatar',
+                            child: Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: AppColors.primaryGradient,
+                              ),
+                              child: CircleAvatar(
+                                radius: 36,
+                                backgroundImage: imageProvider,
+                                backgroundColor: isDark
+                                    ? AppColors.cardDark
+                                    : Colors.grey[200],
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            bottom: 2,
+                            right: 2,
+                            child: Container(
+                              padding: const EdgeInsets.all(5),
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppColors.primaryPurple,
+                              ),
+                              child: const Icon(
+                                Icons.camera_alt_rounded,
+                                color: Colors.white,
+                                size: 12,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Text('Mathan', style: AppTextStyles.heading3(isDark: true)),
-                    Text(
-                      'mathan@expenseai.com',
-                      style: AppTextStyles.bodySmall(isDark: true),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(name, style: AppTextStyles.heading3(isDark: isDark)),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: Icon(Icons.edit_rounded, color: isDark ? AppColors.electricBlue : AppColors.primaryPurple, size: 18),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () => _showEditUsernameDialog(name),
+                        ),
+                      ],
                     ),
+                    if (email.isNotEmpty) ...[
+                      Text(
+                        email,
+                        style: AppTextStyles.bodySmall(isDark: isDark),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -249,9 +688,9 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                         ),
                         Text(
                           '$xp / 1000 XP',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: Colors.white,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                       ],
@@ -290,17 +729,17 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                                 children: [
                                   Text(
                                     c.title,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 13,
-                                      color: Colors.white,
+                                      color: isDark ? Colors.white : Colors.black87,
                                     ),
                                   ),
                                   Text(
                                     c.description,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 10,
-                                      color: AppColors.textSecondaryDark,
+                                      color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
                                     ),
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
@@ -418,16 +857,16 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                                 children: [
                                   Text(
                                     g.title,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.white,
+                                      color: isDark ? Colors.white : Colors.black87,
                                     ),
                                   ),
                                   Text(
                                     '₹${g.currentAmount.toStringAsFixed(0)} / ₹${g.targetAmount.toStringAsFixed(0)}',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.white,
+                                      color: isDark ? Colors.white : Colors.black87,
                                     ),
                                   ),
                                 ],
@@ -439,126 +878,6 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                         );
                       },
                     ),
-
-              const SizedBox(height: 24),
-
-              Text(
-                'FAMILY WALLET & SHARING',
-                style: AppTextStyles.caption(
-                  isDark: isDark,
-                ).copyWith(fontWeight: FontWeight.bold, letterSpacing: 1.0),
-              ),
-              const SizedBox(height: 10),
-              GlassCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Shared Family Wallet',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        Text(
-                          'ID: $familyWalletId',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.textSecondaryDark,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Balance: ₹85,000.00',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.emeraldGreen,
-                      ),
-                    ),
-                    const Divider(color: AppColors.borderDark, height: 20),
-                    const Text(
-                      'Pending Family Approval Split:',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: const BoxDecoration(
-                            color: Colors.white10,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.share_location_rounded,
-                            color: AppColors.accentOrange,
-                            size: 16,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Swiggy Order Split (With Priya)',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              Text(
-                                'Your share: ₹225.00',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: AppColors.textSecondaryDark,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        ElevatedButton(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Split approved & settled in wallet!',
-                                ),
-                                backgroundColor: AppColors.emeraldGreen,
-                              ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primaryPurple,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                          ),
-                          child: const Text(
-                            'Approve',
-                            style: TextStyle(fontSize: 11),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
 
               const SizedBox(height: 24),
 
@@ -578,11 +897,11 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                         isDark
                             ? Icons.dark_mode_rounded
                             : Icons.light_mode_rounded,
-                        color: Colors.white,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
-                      title: const Text(
+                      title: Text(
                         'Dark Theme Mode',
-                        style: TextStyle(color: Colors.white),
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                       ),
                       trailing: Switch(
                         value: isDark,
@@ -592,13 +911,13 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                     ),
                     const Divider(color: AppColors.borderDark, height: 1),
                     ListTile(
-                      leading: const Icon(
+                      leading: Icon(
                         Icons.fingerprint_rounded,
-                        color: Colors.white,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
-                      title: const Text(
+                      title: Text(
                         'Biometric Vault Unlock',
-                        style: TextStyle(color: Colors.white),
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                       ),
                       trailing: Switch(
                         value: _biometrics,
@@ -607,19 +926,19 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                     ),
                     const Divider(color: AppColors.borderDark, height: 1),
                     ListTile(
-                      leading: const Icon(
+                      leading: Icon(
                         Icons.attach_money_rounded,
-                        color: Colors.white,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
-                      title: const Text(
+                      title: Text(
                         'Currency Settings',
-                        style: TextStyle(color: Colors.white),
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                       ),
                       trailing: DropdownButton<String>(
                         value: _currency,
-                        dropdownColor: AppColors.cardDark,
-                        style: const TextStyle(
-                          color: Colors.white,
+                        dropdownColor: isDark ? AppColors.cardDark : Colors.white,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
                           fontWeight: FontWeight.bold,
                         ),
                         items: const [
@@ -647,8 +966,8 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                     child: OutlinedButton(
                       onPressed: _triggerBackup,
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: AppColors.borderDark),
+                        foregroundColor: isDark ? Colors.white : Colors.black87,
+                        side: BorderSide(color: isDark ? AppColors.borderDark : Colors.grey[300]!),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -678,6 +997,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

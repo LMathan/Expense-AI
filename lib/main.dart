@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'core/storage/hive_helper.dart';
 import 'app.dart';
 
@@ -12,14 +13,14 @@ void main() async {
   // Graceful Firebase setup integration fallback. 
   // If the credentials/files are missing during compile/execution, it degrades to Offline-first Hive.
   try {
-    // await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await Firebase.initializeApp();
   } catch (_) {
     // Fall back to local database
   }
 
   runApp(
     const ProviderScope(
-      child: ExpenseAIApp(),
+      child: ExpenseMateApp(),
     ),
   );
 }

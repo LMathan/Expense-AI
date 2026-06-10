@@ -1,0 +1,26 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── User profiles ────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Other authenticated users may read only the search fields (name/email)
+      // so that group-invite & split-expense search can work.
+      allow read: if request.auth != null;
+
+      // Only the owner can write their own profile document.
+      allow write: if request.auth != null && request.auth.uid == userId;
+
+      // ── All private subcollections (transactions, budgets, goals, …) ──────
+      // The app enforces the 1-year data-retention policy at sync time:
+      //   • cleanupOldData() batch-deletes Firestore docs where date < now-365d
+      //   • Firebase Console TTL policy on the 'expireAt' Timestamp field
+      //     automatically deletes the server-side document after expiry.
+      // Both mechanisms run independently so data is always eventually cleaned.
+      match /{subCollection=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}

@@ -20,4 +20,14 @@ class BudgetModel {
       categoryBudgets: cats,
     );
   }
+
+  Map<String, dynamic> toMap() {
+    final Map<String, dynamic> map = {
+      'monthly_income': monthlyIncome,
+    };
+    categoryBudgets.forEach((cat, limit) {
+      map['category_$cat'] = limit;
+    });
+    return map;
+  }
 }

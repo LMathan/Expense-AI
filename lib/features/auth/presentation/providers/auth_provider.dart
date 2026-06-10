@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../../../../core/storage/hive_helper.dart';
+import '../../../../core/services/firestore_sync_service.dart';
 
-enum AuthStatus { initial, authenticating, authenticated, guest, unauthenticated }
+enum AuthStatus { initial, authenticating, syncing, authenticated, guest, unauthenticated }
 
 class AuthState {
   final AuthStatus status;
@@ -39,6 +44,9 @@ final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
 });
 
 class AuthNotifier extends StateNotifier<AuthState> {
+  final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
+  final FirestoreSyncService _syncService = FirestoreSyncService();
+
   AuthNotifier() : super(AuthState.initial()) {
     checkAutoLogin();
   }
@@ -49,14 +57,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final isLoggedIn = box.get('is_logged_in', defaultValue: false) as bool;
       final isGuest = box.get('is_guest_mode', defaultValue: false) as bool;
       final userName = box.get('user_name', defaultValue: 'Mathan') as String;
-      final userEmail = box.get('user_email', defaultValue: '') as String;
 
-      if (isLoggedIn) {
+      final firebaseUser = _firebaseAuth.currentUser;
+
+      if (isLoggedIn && firebaseUser != null) {
         state = AuthState(
           status: AuthStatus.authenticated,
-          email: userEmail,
-          displayName: userName,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName ?? userName,
         );
+        // Sync cloud database to local Hive in the background
+        _syncService.syncCloudToLocal();
       } else if (isGuest) {
         state = AuthState(
           status: AuthStatus.guest,
@@ -72,27 +83,63 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<bool> loginWithEmail(String email, String password) async {
     state = state.copyWith(status: AuthStatus.authenticating);
-    await Future.delayed(const Duration(seconds: 1)); // Premium transition feel
-    
-    if (email.contains('@') && password.length >= 6) {
-      final box = Hive.box(HiveHelper.settingsBox);
-      await box.put('is_logged_in', true);
-      await box.put('is_guest_mode', false);
-      await box.put('user_email', email);
-      
-      final displayName = email.split('@').first;
-      await box.put('user_name', displayName[0].toUpperCase() + displayName.substring(1));
-
-      state = AuthState(
-        status: AuthStatus.authenticated,
+    try {
+      final userCredential = await _firebaseAuth.signInWithEmailAndPassword(
         email: email,
-        displayName: box.get('user_name'),
-      );
-      return true;
-    } else {
+        password: password,
+      ).timeout(const Duration(seconds: 15));
+      final user = userCredential.user;
+      if (user != null) {
+        final box = Hive.box(HiveHelper.settingsBox);
+        await box.put('is_logged_in', true);
+        await box.put('is_guest_mode', false);
+        await box.put('user_email', user.email ?? email);
+        
+        final displayName = user.displayName ?? (user.email != null ? user.email!.split('@').first : 'User');
+        await box.put('user_name', displayName);
+
+        // Await data sync before marking as authenticated
+        state = AuthState(
+          status: AuthStatus.syncing,
+          email: user.email,
+          displayName: displayName,
+        );
+        try {
+          await _syncService.syncCloudToLocal()
+              .timeout(const Duration(seconds: 20));
+        } catch (_) {
+          // sync failure is non-fatal — carry on with local data
+        }
+
+        state = AuthState(
+          status: AuthStatus.authenticated,
+          email: user.email,
+          displayName: displayName,
+        );
+        return true;
+      } else {
+        state = AuthState(
+          status: AuthStatus.unauthenticated,
+          errorMessage: 'Login failed',
+        );
+        return false;
+      }
+    } on FirebaseAuthException catch (e) {
       state = AuthState(
         status: AuthStatus.unauthenticated,
-        errorMessage: 'Invalid email or password (min 6 characters)',
+        errorMessage: e.message ?? 'Login failed',
+      );
+      return false;
+    } on TimeoutException {
+      state = AuthState(
+        status: AuthStatus.unauthenticated,
+        errorMessage: 'Connection timed out. Please check your internet connection.',
+      );
+      return false;
+    } catch (e) {
+      state = AuthState(
+        status: AuthStatus.unauthenticated,
+        errorMessage: 'An unexpected error occurred',
       );
       return false;
     }
@@ -100,45 +147,134 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<bool> signupWithEmail(String email, String password, String name) async {
     state = state.copyWith(status: AuthStatus.authenticating);
-    await Future.delayed(const Duration(seconds: 1));
-
-    if (email.contains('@') && password.length >= 6 && name.isNotEmpty) {
-      final box = Hive.box(HiveHelper.settingsBox);
-      await box.put('is_logged_in', true);
-      await box.put('is_guest_mode', false);
-      await box.put('user_email', email);
-      await box.put('user_name', name);
-
-      state = AuthState(
-        status: AuthStatus.authenticated,
+    try {
+      final userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
         email: email,
-        displayName: name,
-      );
-      return true;
-    } else {
+        password: password,
+      ).timeout(const Duration(seconds: 15));
+      final user = userCredential.user;
+      if (user != null) {
+        await user.updateDisplayName(name);
+
+        final box = Hive.box(HiveHelper.settingsBox);
+        await box.put('is_logged_in', true);
+        await box.put('is_guest_mode', false);
+        await box.put('user_email', email);
+        await box.put('user_name', name);
+
+        state = AuthState(
+          status: AuthStatus.authenticated,
+          email: email,
+          displayName: name,
+        );
+
+        // Upload initial local/offline configuration to new Cloud profile in background
+        _syncService.syncLocalToCloud();
+        return true;
+      } else {
+        state = AuthState(
+          status: AuthStatus.unauthenticated,
+          errorMessage: 'Registration failed',
+        );
+        return false;
+      }
+    } on FirebaseAuthException catch (e) {
       state = AuthState(
         status: AuthStatus.unauthenticated,
-        errorMessage: 'Invalid registration details',
+        errorMessage: e.message ?? 'Registration failed',
+      );
+      return false;
+    } on TimeoutException {
+      state = AuthState(
+        status: AuthStatus.unauthenticated,
+        errorMessage: 'Connection timed out. Please check your internet connection.',
+      );
+      return false;
+    } catch (e) {
+      state = AuthState(
+        status: AuthStatus.unauthenticated,
+        errorMessage: 'An unexpected error occurred',
       );
       return false;
     }
   }
 
-  Future<void> loginWithGoogle() async {
+  Future<bool> loginWithGoogle() async {
     state = state.copyWith(status: AuthStatus.authenticating);
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      debugPrint('Google Sign-In: Initializing GoogleSignIn SDK...');
+      final GoogleSignIn googleSignIn = GoogleSignIn();
+      debugPrint('Google Sign-In: Triggering account selector dialog...');
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      if (googleUser == null) {
+        debugPrint('Google Sign-In: User cancelled account selection.');
+        state = AuthState(status: AuthStatus.unauthenticated);
+        return false;
+      }
 
-    final box = Hive.box(HiveHelper.settingsBox);
-    await box.put('is_logged_in', true);
-    await box.put('is_guest_mode', false);
-    await box.put('user_email', 'mathan.google@gmail.com');
-    await box.put('user_name', 'Mathan');
+      debugPrint('Google Sign-In: Fetching authentication tokens for ${googleUser.email}...');
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      debugPrint('Google Sign-In: Creating credential...');
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
 
-    state = AuthState(
-      status: AuthStatus.authenticated,
-      email: 'mathan.google@gmail.com',
-      displayName: 'Mathan',
-    );
+      debugPrint('Google Sign-In: Attempting Firebase Auth sign-in with credential...');
+      final userCredential = await _firebaseAuth
+          .signInWithCredential(credential)
+          .timeout(const Duration(seconds: 15));
+      final user = userCredential.user;
+      if (user != null) {
+        debugPrint('Google Sign-In: Firebase login successful! Saving user settings to Hive...');
+        final box = Hive.box(HiveHelper.settingsBox);
+        await box.put('is_logged_in', true);
+        await box.put('is_guest_mode', false);
+        await box.put('user_email', user.email ?? '');
+        
+        final displayName = user.displayName ?? (user.email != null ? user.email!.split('@').first : 'User');
+        await box.put('user_name', displayName);
+
+        debugPrint('Google Sign-In: Starting Firestore sync...');
+        state = AuthState(
+          status: AuthStatus.syncing,
+          email: user.email,
+          displayName: displayName,
+        );
+        try {
+          await _syncService.syncCloudToLocal()
+              .timeout(const Duration(seconds: 20));
+        } catch (_) {}
+
+        state = AuthState(
+          status: AuthStatus.authenticated,
+          email: user.email,
+          displayName: displayName,
+        );
+        return true;
+      } else {
+        debugPrint('Google Sign-In: Firebase returned null user.');
+        state = AuthState(
+          status: AuthStatus.unauthenticated,
+          errorMessage: 'Google login failed',
+        );
+        return false;
+      }
+    } catch (e) {
+      debugPrint('Google Sign-In Error caught: $e');
+      final errText = e.toString();
+      String msg = errText;
+      if (e is TimeoutException) {
+        msg = 'Connection timed out. Please check your internet connection.';
+      } else if (errText.contains('10')) {
+        msg = 'Google Sign-In Error (SHA-1 fingerprint not registered in Firebase console)';
+      }
+      state = AuthState(
+        status: AuthStatus.unauthenticated,
+        errorMessage: msg,
+      );
+      return false;
+    }
   }
 
   Future<void> loginAsGuest() async {
@@ -157,6 +293,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> logout() async {
+    try {
+      await _firebaseAuth.signOut();
+    } catch (_) {}
     final box = Hive.box(HiveHelper.settingsBox);
     await box.put('is_logged_in', false);
     await box.put('is_guest_mode', false);
@@ -164,6 +303,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> deleteAccount() async {
+    try {
+      await _firebaseAuth.currentUser?.delete();
+      await _firebaseAuth.signOut();
+    } catch (_) {}
     final box = Hive.box(HiveHelper.settingsBox);
     await box.clear();
     state = AuthState(status: AuthStatus.unauthenticated);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:espenseai/core/constants/colors.dart';
 import 'package:espenseai/core/constants/text_styles.dart';
 import 'package:espenseai/core/widgets/glass_card.dart';
@@ -7,6 +8,8 @@ import 'package:espenseai/core/widgets/interactive_chart.dart';
 import 'package:espenseai/core/services/report_service.dart';
 import 'dart:io';
 import 'package:espenseai/features/expense/presentation/providers/expense_provider.dart';
+import 'package:espenseai/core/utils/category_emoji_helper.dart';
+import 'package:espenseai/core/widgets/vector_illustrations.dart';
 
 class AnalyticsTab extends ConsumerStatefulWidget {
   const AnalyticsTab({super.key});
@@ -22,24 +25,20 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
   bool _isExporting = false;
 
   void _exportAndShare(String type) async {
-    setState(() {
-      _isExporting = true;
-    });
-
+    setState(() => _isExporting = true);
     try {
       File file;
       String subject;
       if (type == 'PDF') {
         file = await _reportService.generatePdfReport();
-        subject = 'My ExpenseAI Statement - PDF';
+        subject = 'My ExpenseMate Statement - PDF';
       } else if (type == 'Excel') {
         file = await _reportService.generateExcelReport();
-        subject = 'My ExpenseAI Statement - Spreadsheet';
+        subject = 'My ExpenseMate Statement - Spreadsheet';
       } else {
         file = await _reportService.generateCsvReport();
-        subject = 'My ExpenseAI Statement - CSV';
+        subject = 'My ExpenseMate Statement - CSV';
       }
-
       await _reportService.shareReport(file, subject: subject);
     } catch (e) {
       if (mounted) {
@@ -48,11 +47,7 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isExporting = false;
-        });
-      }
+      if (mounted) setState(() => _isExporting = false);
     }
   }
 
@@ -60,26 +55,26 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
   Widget build(BuildContext context) {
     final txs = ref.watch(transactionProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : AppColors.textPrimaryLight;
+    final subColor = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    final cardBg = isDark ? AppColors.cardDark : Colors.white;
+    final borderColor = isDark ? AppColors.borderDark : AppColors.borderLight;
+    final dividerColor = isDark ? AppColors.borderDark : AppColors.borderLight;
 
     final Map<String, double> categorySums = {};
     final Map<String, double> merchantSums = {};
     double totalSpent = 0.0;
-    
     final Map<String, double> dailySums = {};
 
     for (var tx in txs) {
       totalSpent += tx.amount;
       categorySums[tx.category] = (categorySums[tx.category] ?? 0.0) + tx.amount;
       merchantSums[tx.merchant] = (merchantSums[tx.merchant] ?? 0.0) + tx.amount;
-      
       final dateKey = tx.date.toString().substring(0, 10);
       dailySums[dateKey] = (dailySums[dateKey] ?? 0.0) + tx.amount;
     }
 
     final sortedCategories = categorySums.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    
-    final sortedMerchants = merchantSums.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     String mostExpensiveDay = 'N/A';
@@ -93,7 +88,7 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
 
     final avgDailySpend = dailySums.isEmpty ? 0.0 : totalSpent / dailySums.length;
 
-    final trendValues = _timeRange == 'Weekly' 
+    final trendValues = _timeRange == 'Weekly'
         ? [800.0, 1500.0, 3000.0, 1200.0, 4500.0, 2100.0, 1800.0]
         : [15000.0, 22000.0, 18000.0, 25000.0, 12000.0, totalSpent];
 
@@ -102,37 +97,37 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
         : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: SafeArea(
+      backgroundColor: isDark ? AppColors.bgDark : AppColors.bgLight,
+      body: AppBackground(
+        type: PageBg.analytics,
+        child: SafeArea(
         child: _isExporting
-            ? const Center(
+            ? Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    CircularProgressIndicator(color: AppColors.primaryPurple),
-                    SizedBox(height: 16),
-                    Text('Compiling statement reports...', style: TextStyle(color: Colors.white)),
+                    const CircularProgressIndicator(color: AppColors.primaryPurple),
+                    const SizedBox(height: 16),
+                    Text('Compiling report...', style: TextStyle(color: subColor)),
                   ],
                 ),
               )
             : SingleChildScrollView(
-                padding: const EdgeInsets.all(20.0),
+                padding: const EdgeInsets.all(20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      'Analytics & Reports',
-                      style: AppTextStyles.heading2(isDark: isDark),
-                    ),
+                    Text('Analytics & Reports', style: AppTextStyles.heading2(isDark: isDark)),
                     const SizedBox(height: 20),
 
+                    // Chart type pills
                     Row(
                       children: [
-                        _buildTypePill(ChartType.pie, Icons.pie_chart_rounded, 'Pie'),
+                        _buildTypePill(ChartType.pie, Icons.pie_chart_rounded, 'Pie', isDark),
                         const SizedBox(width: 8),
-                        _buildTypePill(ChartType.line, Icons.show_chart_rounded, 'Line'),
+                        _buildTypePill(ChartType.line, Icons.show_chart_rounded, 'Line', isDark),
                         const SizedBox(width: 8),
-                        _buildTypePill(ChartType.bar, Icons.bar_chart_rounded, 'Bar'),
+                        _buildTypePill(ChartType.bar, Icons.bar_chart_rounded, 'Bar', isDark),
                       ],
                     ),
                     const SizedBox(height: 20),
@@ -141,9 +136,9 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          _buildRangeButton('Weekly'),
+                          _buildRangeButton('Weekly', isDark),
                           const SizedBox(width: 8),
-                          _buildRangeButton('Monthly'),
+                          _buildRangeButton('Monthly', isDark),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -157,42 +152,39 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
                         labels: trendLabels,
                       ),
                     ),
-                    
-                    const SizedBox(height: 24),
 
+                    const SizedBox(height: 20),
+
+                    // Stat cards
                     Row(
                       children: [
                         Expanded(
-                          child: GlassCard(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Avg Daily Spend', style: TextStyle(fontSize: 11, color: AppColors.textSecondaryDark)),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '₹${avgDailySpend.toStringAsFixed(0)}',
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                                ),
-                              ],
-                            ),
+                          child: _StatMiniCard(
+                            label: 'Avg Daily',
+                            value: '₹${avgDailySpend.toStringAsFixed(0)}',
+                            icon: Icons.trending_up_rounded,
+                            color: AppColors.electricBlue,
+                            isDark: isDark,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: GlassCard(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Peak Spending Day', style: TextStyle(fontSize: 11, color: AppColors.textSecondaryDark)),
-                                const SizedBox(height: 4),
-                                Text(
-                                  mostExpensiveDay == 'N/A' ? 'N/A' : mostExpensiveDay.substring(5),
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                                ),
-                              ],
-                            ),
+                          child: _StatMiniCard(
+                            label: 'Peak Day',
+                            value: mostExpensiveDay == 'N/A' ? 'N/A' : mostExpensiveDay.substring(5),
+                            icon: Icons.local_fire_department_rounded,
+                            color: AppColors.accentOrange,
+                            isDark: isDark,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _StatMiniCard(
+                            label: 'Categories',
+                            value: '${sortedCategories.length}',
+                            icon: Icons.category_rounded,
+                            color: AppColors.primaryPurple,
+                            isDark: isDark,
                           ),
                         ),
                       ],
@@ -200,34 +192,115 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
 
                     const SizedBox(height: 24),
 
+                    // Top Categories
                     Text(
                       'TOP CATEGORIES',
-                      style: AppTextStyles.caption(isDark: isDark).copyWith(fontWeight: FontWeight.bold, letterSpacing: 1.0),
+                      style: AppTextStyles.caption(isDark: isDark).copyWith(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    GlassCard(
+
+                    Container(
+                      decoration: BoxDecoration(
+                        color: cardBg,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: borderColor),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
                       child: sortedCategories.isEmpty
-                          ? const Center(child: Text('No details logged yet.', style: TextStyle(color: AppColors.textSecondaryDark)))
+                          ? Padding(
+                              padding: const EdgeInsets.all(20),
+                              child: Center(
+                                child: Text('No transactions logged yet.', style: TextStyle(color: subColor)),
+                              ),
+                            )
                           : ListView.separated(
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
-                              itemCount: sortedCategories.length > 4 ? 4 : sortedCategories.length,
-                              separatorBuilder: (context, index) => const Divider(color: AppColors.borderDark, height: 16),
+                              itemCount: sortedCategories.length > 5 ? 5 : sortedCategories.length,
+                              separatorBuilder: (_, __) => Divider(color: dividerColor, height: 1),
                               itemBuilder: (context, index) {
                                 final entry = sortedCategories[index];
-                                final pct = totalSpent > 0 ? (entry.value / totalSpent * 100).toStringAsFixed(0) : '0';
-                                return Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                                    Row(
-                                      children: [
-                                        Text('₹${entry.value.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                                        const SizedBox(width: 8),
-                                        Text('$pct%', style: const TextStyle(color: AppColors.textSecondaryDark, fontSize: 12)),
-                                      ],
-                                    ),
-                                  ],
+                                final pct = totalSpent > 0
+                                    ? (entry.value / totalSpent * 100)
+                                    : 0.0;
+                                final pctStr = pct.toStringAsFixed(1);
+                                final barColors = [
+                                  AppColors.primaryPurple,
+                                  AppColors.electricBlue,
+                                  AppColors.emeraldGreen,
+                                  AppColors.accentOrange,
+                                  AppColors.accentPink,
+                                ];
+                                final barColor = barColors[index % barColors.length];
+
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  child: Column(
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(7),
+                                            decoration: BoxDecoration(
+                                              color: barColor.withValues(alpha: 0.12),
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: Text(
+                                              getCategoryEmoji(entry.key),
+                                              style: const TextStyle(fontSize: 14),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              entry.key,
+                                              style: GoogleFonts.inter(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 13,
+                                                color: textColor,
+                                              ),
+                                            ),
+                                          ),
+                                          Column(
+                                            crossAxisAlignment: CrossAxisAlignment.end,
+                                            children: [
+                                              Text(
+                                                '₹${entry.value.toStringAsFixed(0)}',
+                                                style: GoogleFonts.inter(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 13,
+                                                  color: textColor,
+                                                ),
+                                              ),
+                                              Text(
+                                                '$pctStr%',
+                                                style: TextStyle(color: subColor, fontSize: 11),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: LinearProgressIndicator(
+                                          value: pct / 100,
+                                          minHeight: 5,
+                                          backgroundColor: barColor.withValues(alpha: 0.1),
+                                          valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 );
                               },
                             ),
@@ -235,63 +308,67 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
 
                     const SizedBox(height: 24),
 
+                    // Export
                     Text(
                       'EXPORT STATEMENTS',
-                      style: AppTextStyles.caption(isDark: isDark).copyWith(fontWeight: FontWeight.bold, letterSpacing: 1.0),
+                      style: AppTextStyles.caption(isDark: isDark).copyWith(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     Row(
                       children: [
-                        Expanded(
-                          child: _buildExportButton('PDF', Icons.picture_as_pdf, Colors.redAccent),
-                        ),
+                        Expanded(child: _buildExportButton('PDF', Icons.picture_as_pdf_rounded, Colors.redAccent, isDark)),
                         const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildExportButton('Excel', Icons.table_chart_rounded, Colors.green),
-                        ),
+                        Expanded(child: _buildExportButton('Excel', Icons.table_chart_rounded, Colors.green, isDark)),
                         const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildExportButton('CSV', Icons.notes_rounded, Colors.blue),
-                        ),
+                        Expanded(child: _buildExportButton('CSV', Icons.notes_rounded, Colors.blue, isDark)),
                       ],
                     ),
                     const SizedBox(height: 100),
                   ],
                 ),
               ),
+        ),
       ),
     );
   }
 
-  Widget _buildTypePill(ChartType type, IconData icon, String text) {
+  Widget _buildTypePill(ChartType type, IconData icon, String text, bool isDark) {
     final isSelected = _selectedChartType == type;
+    final inactiveColor = isDark ? AppColors.cardDark : Colors.white;
+    final inactiveBorder = isDark ? AppColors.borderDark : AppColors.borderLight;
+    final inactiveText = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+
     return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedChartType = type;
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      onTap: () => setState(() => _selectedChartType = type),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
           gradient: isSelected ? AppColors.primaryGradient : null,
-          color: isSelected ? null : AppColors.cardDark,
+          color: isSelected ? null : inactiveColor,
           border: Border.all(
-            color: isSelected ? Colors.transparent : AppColors.borderDark,
+            color: isSelected ? Colors.transparent : inactiveBorder,
             width: 1.2,
           ),
+          boxShadow: isSelected
+              ? [BoxShadow(color: AppColors.primaryPurple.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3))]
+              : null,
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: isSelected ? Colors.white : AppColors.textSecondaryDark),
+            Icon(icon, size: 16, color: isSelected ? Colors.white : inactiveText),
             const SizedBox(width: 6),
             Text(
               text,
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : AppColors.textSecondaryDark,
+                color: isSelected ? Colors.white : inactiveText,
               ),
             ),
           ],
@@ -300,25 +377,23 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
     );
   }
 
-  Widget _buildRangeButton(String range) {
+  Widget _buildRangeButton(String range, bool isDark) {
     final isSelected = _timeRange == range;
+    final subColor = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
     return GestureDetector(
-      onTap: () {
-        setState(() {
-          _timeRange = range;
-        });
-      },
+      onTap: () => setState(() => _timeRange = range),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           color: isSelected ? AppColors.primaryPurple : Colors.transparent,
+          border: isSelected ? null : Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
         ),
         child: Text(
           range,
           style: TextStyle(
             fontSize: 11,
-            color: isSelected ? Colors.white : AppColors.textSecondaryDark,
+            color: isSelected ? Colors.white : subColor,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -326,23 +401,85 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
     );
   }
 
-  Widget _buildExportButton(String label, IconData icon, Color color) {
+  Widget _buildExportButton(String label, IconData icon, Color color, bool isDark) {
+    final textColor = isDark ? Colors.white : AppColors.textPrimaryLight;
     return InkWell(
       onTap: () => _exportAndShare(label),
       borderRadius: BorderRadius.circular(16),
-      child: GlassCard(
+      child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-        borderRadius: 16,
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.cardDark : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        ),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 28),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
             const SizedBox(height: 8),
             Text(
               'Share $label',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
-            )
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: textColor,
+              ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _StatMiniCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+  final bool isDark;
+
+  const _StatMiniCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isDark ? Colors.white : AppColors.textPrimaryLight;
+    final subColor = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.cardDark : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
+            child: Icon(icon, color: color, size: 16),
+          ),
+          const SizedBox(height: 8),
+          Text(label, style: TextStyle(fontSize: 10, color: subColor)),
+          const SizedBox(height: 2),
+          Text(value, style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: textColor)),
+        ],
       ),
     );
   }

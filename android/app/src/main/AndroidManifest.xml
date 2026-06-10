@@ -7,7 +7,7 @@
     <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
 
     <application
-        android:label="espenseai"
+        android:label="ExpenseMate"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity

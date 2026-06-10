@@ -5,12 +5,15 @@ import 'package:espenseai/core/constants/colors.dart';
 import 'package:espenseai/core/constants/text_styles.dart';
 import 'package:espenseai/core/widgets/glass_card.dart';
 import 'package:espenseai/features/expense/presentation/providers/expense_provider.dart';
+import 'package:espenseai/core/utils/category_emoji_helper.dart';
+import 'package:espenseai/core/widgets/vector_illustrations.dart';
 
 class AddExpenseScreen extends ConsumerStatefulWidget {
   final double? preFilledAmount;
   final String? preFilledCategory;
   final String? preFilledMerchant;
   final String? preFilledNotes;
+  final dynamic editTransaction; // When set, this is an edit operation
 
   const AddExpenseScreen({
     super.key,
@@ -18,6 +21,7 @@ class AddExpenseScreen extends ConsumerStatefulWidget {
     this.preFilledCategory,
     this.preFilledMerchant,
     this.preFilledNotes,
+    this.editTransaction,
   });
 
   @override
@@ -48,12 +52,12 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
     'Other',
   ];
 
-  final List<String> _paymentMethods = [
-    'UPI',
-    'Credit Card',
-    'Debit Card',
-    'NetBanking',
-    'Cash',
+  static const List<Map<String, String>> _paymentMethods = [
+    {'name': 'UPI',         'emoji': '📱'},
+    {'name': 'Credit Card', 'emoji': '💳'},
+    {'name': 'Debit Card',  'emoji': '🏧'},
+    {'name': 'NetBanking',  'emoji': '🏦'},
+    {'name': 'Cash',        'emoji': '💵'},
   ];
 
   @override
@@ -63,6 +67,18 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
   }
 
   void _prefillFields() {
+    // Editing existing transaction takes priority
+    final tx = widget.editTransaction;
+    if (tx != null) {
+      _amountController.text = tx.amount.toStringAsFixed(2);
+      _merchantController.text = tx.merchant ?? '';
+      _notesController.text = tx.notes ?? '';
+      _selectedDate = tx.date ?? DateTime.now();
+      if (_categories.contains(tx.category)) _selectedCategory = tx.category;
+      final names = _paymentMethods.map((m) => m['name']!).toList();
+      if (names.contains(tx.paymentMethod)) _selectedPaymentMethod = tx.paymentMethod;
+      return;
+    }
     if (widget.preFilledAmount != null && widget.preFilledAmount! > 0) {
       _amountController.text = widget.preFilledAmount!.toStringAsFixed(0);
     }
@@ -119,23 +135,34 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       final amount = double.tryParse(_amountController.text) ?? 0.0;
       final merchant = _merchantController.text.trim();
       final notes = _notesController.text.trim();
+      final isEditing = widget.editTransaction != null;
 
-      await ref
-          .read(transactionProvider.notifier)
-          .addTransaction(
-            amount: amount,
-            category: _selectedCategory,
-            merchant: merchant.isEmpty ? _selectedCategory : merchant,
-            notes: notes,
-            paymentMethod: _selectedPaymentMethod,
-            date: _selectedDate,
-          );
+      if (isEditing) {
+        final updated = widget.editTransaction.copyWith(
+          amount: amount,
+          category: _selectedCategory,
+          merchant: merchant.isEmpty ? _selectedCategory : merchant,
+          notes: notes,
+          paymentMethod: _selectedPaymentMethod,
+          date: _selectedDate,
+        );
+        await ref.read(transactionProvider.notifier).editTransaction(updated);
+      } else {
+        await ref.read(transactionProvider.notifier).addTransaction(
+          amount: amount,
+          category: _selectedCategory,
+          merchant: merchant.isEmpty ? _selectedCategory : merchant,
+          notes: notes,
+          paymentMethod: _selectedPaymentMethod,
+          date: _selectedDate,
+        );
+      }
 
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Expense logged successfully!'),
+          SnackBar(
+            content: Text(isEditing ? 'Transaction updated!' : 'Expense logged!'),
             backgroundColor: AppColors.emeraldGreen,
           ),
         );
@@ -151,9 +178,9 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
       backgroundColor: isDark ? AppColors.bgDark : AppColors.bgLight,
       appBar: AppBar(
         title: Text(
-          'Log Expense',
+          widget.editTransaction != null ? 'Edit Transaction' : 'Log Expense',
           style: TextStyle(
-            color: isDark ? Colors.white : Colors.black,
+            color: isDark ? Colors.white : AppColors.textPrimaryLight,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -165,7 +192,9 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: SafeArea(
+      body: AppBackground(
+        type: PageBg.expense,
+        child: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20.0),
           child: Form(
@@ -257,7 +286,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                       return GestureDetector(
                         onTap: () => setState(() => _selectedCategory = cat),
                         child: Container(
-                          width: 90,
+                          width: 100,
                           margin: const EdgeInsets.only(right: 10),
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
@@ -265,24 +294,36 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                             border: Border.all(
                               color: isSelected
                                   ? AppColors.primaryPurple
-                                  : AppColors.borderDark,
+                                  : (isDark ? AppColors.borderDark : Colors.grey[300]!),
                               width: isSelected ? 2.0 : 1.0,
                             ),
                             color: isSelected
                                 ? AppColors.primaryPurple.withValues(
                                     alpha: 0.15,
                                   )
-                                : AppColors.cardDark.withValues(alpha: 0.3),
+                                : (isDark
+                                    ? AppColors.cardDark.withValues(alpha: 0.3)
+                                    : Colors.grey[200]),
                           ),
-                          child: Text(
-                            cat,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: isSelected
-                                  ? AppColors.primaryPurple
-                                  : Colors.white70,
-                            ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                getCategoryEmoji(cat),
+                                style: const TextStyle(fontSize: 22),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                cat,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: isSelected
+                                      ? AppColors.primaryPurple
+                                      : (isDark ? Colors.white70 : Colors.black87),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       );
@@ -430,8 +471,17 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                                   ),
                                   items: _paymentMethods.map((m) {
                                     return DropdownMenuItem(
-                                      value: m,
-                                      child: Text(m),
+                                      value: m['name'],
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(m['emoji']!,
+                                              style: const TextStyle(
+                                                  fontSize: 15)),
+                                          const SizedBox(width: 6),
+                                          Text(m['name']!),
+                                        ],
+                                      ),
                                     );
                                   }).toList(),
                                   onChanged: (val) {
@@ -474,6 +524,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
             ),
           ),
         ),
+      ),
       ),
     );
   }

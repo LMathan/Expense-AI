@@ -4,15 +4,15 @@ import 'core/theme/app_theme.dart';
 import 'core/theme/theme_provider.dart';
 import 'features/auth/presentation/screens/splash_screen.dart';
 
-class ExpenseAIApp extends ConsumerWidget {
-  const ExpenseAIApp({super.key});
+class ExpenseMateApp extends ConsumerWidget {
+  const ExpenseMateApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeProvider);
 
     return MaterialApp(
-      title: 'ExpenseAI',
+      title: 'ExpenseMate',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,

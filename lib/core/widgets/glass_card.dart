@@ -26,45 +26,65 @@ class GlassCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    if (!isDark) {
+      // Light mode: clean white card with subtle shadow
+      return Container(
+        padding: padding,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(borderRadius),
+          border: customBorder ??
+              Border.all(color: AppColors.borderLight, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+          gradient: gradientColors != null
+              ? LinearGradient(
+                  colors: gradientColors!,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+        ),
+        child: child,
+      );
+    }
+
+    // Dark mode: glassmorphism
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(borderRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
+            color: Colors.black.withValues(alpha: 0.28),
             blurRadius: 20,
-            offset: const Offset(0, 10),
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 15.0, sigmaY: 15.0),
+          filter: ImageFilter.blur(sigmaX: 14.0, sigmaY: 14.0),
           child: Container(
             padding: padding,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(borderRadius),
-              border:
-                  customBorder ??
+              border: customBorder ??
                   Border.all(
-                    color: (isDark ? Colors.white : Colors.black).withValues(
-                      alpha: borderOpacity,
-                    ),
+                    color: Colors.white.withValues(alpha: borderOpacity),
                     width: 1.2,
                   ),
               gradient: LinearGradient(
-                colors:
-                    gradientColors ??
-                    (isDark
-                        ? [
-                            Colors.white.withValues(alpha: bgOpacity),
-                            Colors.white.withValues(alpha: bgOpacity * 0.3),
-                          ]
-                        : [
-                            Colors.white.withValues(alpha: 0.8),
-                            Colors.white.withValues(alpha: 0.4),
-                          ]),
+                colors: gradientColors ??
+                    [
+                      Colors.white.withValues(alpha: bgOpacity),
+                      Colors.white.withValues(alpha: bgOpacity * 0.3),
+                    ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),

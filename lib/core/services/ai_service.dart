@@ -119,6 +119,6 @@ class AiService {
     }
 
     // 3. General greetings/help
-    return "Hi, I am your ExpenseAI Financial Advisor. I have analyzed your income (₹${income.toStringAsFixed(0)}) and expenses (₹${totalSpent.toStringAsFixed(0)}). You can ask me questions like:\n- 'Can I afford a ₹15,000 smartwatch?'\n- 'How much should I save monthly?'\n- 'Should I buy a bike of ₹1,20.000?'";
+    return "Hi, I am your ExpenseMate Financial Advisor. I have analyzed your income (₹${income.toStringAsFixed(0)}) and expenses (₹${totalSpent.toStringAsFixed(0)}). You can ask me questions like:\n- 'Can I afford a ₹15,000 smartwatch?'\n- 'How much should I save monthly?'\n- 'Should I buy a bike of ₹1,20.000?'";
   }
 }
