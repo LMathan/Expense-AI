@@ -236,6 +236,50 @@ class FirestoreSyncService {
     }
   }
 
+  // Real-time listener for user profile settings
+  StreamSubscription<DocumentSnapshot>? listenToUserProfile(Function(Map<String, dynamic>) onProfileChanged) {
+    if (!isAuthenticated) return null;
+    return _firestore
+        .collection('users')
+        .doc(_uid)
+        .snapshots()
+        .listen((snapshot) async {
+          if (snapshot.exists && snapshot.data() != null) {
+            final data = snapshot.data()!;
+            final settingsBox = Hive.box(HiveHelper.settingsBox);
+            
+            // Sync values to local Hive settings box
+            if (data.containsKey('displayName')) {
+              await settingsBox.put('user_name', data['displayName']);
+            }
+            if (data.containsKey('photoUrl') && data['photoUrl'] != null) {
+              final photoUrl = data['photoUrl'] as String;
+              await settingsBox.put('profile_picture_url', photoUrl);
+              if (photoUrl.startsWith('data:image')) {
+                try {
+                  final base64String = photoUrl.split('base64,').last;
+                  final bytes = base64Decode(base64String);
+                  final tmpDir = await getTemporaryDirectory();
+                  final cachedFile = File('${tmpDir.path}/profile_cached.jpg');
+                  await cachedFile.writeAsBytes(bytes);
+                  await settingsBox.put('profile_picture_path', cachedFile.path);
+                } catch (_) {
+                  await settingsBox.put('profile_picture_path', photoUrl);
+                }
+              } else {
+                await settingsBox.put('profile_picture_path', photoUrl);
+              }
+            } else {
+              // Photo url was either deleted or is null
+              await settingsBox.delete('profile_picture_url');
+              await settingsBox.delete('profile_picture_path');
+            }
+            
+            onProfileChanged(data);
+          }
+        });
+  }
+
   // Real-time listener for user groups
   StreamSubscription<QuerySnapshot>? listenToGroups(VoidCallback onChanged) {
     if (!isAuthenticated) return null;

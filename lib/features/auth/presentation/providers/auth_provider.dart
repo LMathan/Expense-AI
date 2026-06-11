@@ -13,12 +13,16 @@ class AuthState {
   final AuthStatus status;
   final String? email;
   final String? displayName;
+  final String? profilePicPath;
+  final String? profilePicUrl;
   final String? errorMessage;
 
   AuthState({
     required this.status,
     this.email,
     this.displayName,
+    this.profilePicPath,
+    this.profilePicUrl,
     this.errorMessage,
   });
 
@@ -28,12 +32,16 @@ class AuthState {
     AuthStatus? status,
     String? email,
     String? displayName,
+    String? profilePicPath,
+    String? profilePicUrl,
     String? errorMessage,
   }) {
     return AuthState(
       status: status ?? this.status,
       email: email ?? this.email,
       displayName: displayName ?? this.displayName,
+      profilePicPath: profilePicPath ?? this.profilePicPath,
+      profilePicUrl: profilePicUrl ?? this.profilePicUrl,
       errorMessage: errorMessage ?? this.errorMessage,
     );
   }
@@ -57,6 +65,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final isLoggedIn = box.get('is_logged_in', defaultValue: false) as bool;
       final isGuest = box.get('is_guest_mode', defaultValue: false) as bool;
       final userName = box.get('user_name', defaultValue: 'Mathan') as String;
+      final profilePicPath = box.get('profile_picture_path') as String?;
+      final profilePicUrl = box.get('profile_picture_url') as String?;
 
       final firebaseUser = _firebaseAuth.currentUser;
 
@@ -65,6 +75,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
           status: AuthStatus.authenticated,
           email: firebaseUser.email,
           displayName: firebaseUser.displayName ?? userName,
+          profilePicPath: profilePicPath,
+          profilePicUrl: profilePicUrl,
         );
         // Sync cloud database to local Hive in the background
         _syncService.syncCloudToLocal();
@@ -72,6 +84,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         state = AuthState(
           status: AuthStatus.guest,
           displayName: userName,
+          profilePicPath: profilePicPath,
+          profilePicUrl: profilePicUrl,
         );
       } else {
         state = AuthState(status: AuthStatus.unauthenticated);
@@ -98,11 +112,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
         final displayName = user.displayName ?? (user.email != null ? user.email!.split('@').first : 'User');
         await box.put('user_name', displayName);
 
+        final profilePicPath = box.get('profile_picture_path') as String?;
+        final profilePicUrl = box.get('profile_picture_url') as String?;
+
         // Await data sync before marking as authenticated
         state = AuthState(
           status: AuthStatus.syncing,
           email: user.email,
           displayName: displayName,
+          profilePicPath: profilePicPath,
+          profilePicUrl: profilePicUrl,
         );
         try {
           await _syncService.syncCloudToLocal()
@@ -111,10 +130,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
           // sync failure is non-fatal — carry on with local data
         }
 
+        final updatedPath = box.get('profile_picture_path') as String?;
+        final updatedUrl = box.get('profile_picture_url') as String?;
+
         state = AuthState(
           status: AuthStatus.authenticated,
           email: user.email,
-          displayName: displayName,
+          displayName: box.get('user_name', defaultValue: displayName) as String?,
+          profilePicPath: updatedPath,
+          profilePicUrl: updatedUrl,
         );
         return true;
       } else {
@@ -162,10 +186,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
         await box.put('user_email', email);
         await box.put('user_name', name);
 
+        final profilePicPath = box.get('profile_picture_path') as String?;
+        final profilePicUrl = box.get('profile_picture_url') as String?;
+
         state = AuthState(
           status: AuthStatus.authenticated,
           email: email,
           displayName: name,
+          profilePicPath: profilePicPath,
+          profilePicUrl: profilePicUrl,
         );
 
         // Upload initial local/offline configuration to new Cloud profile in background
@@ -235,21 +264,31 @@ class AuthNotifier extends StateNotifier<AuthState> {
         final displayName = user.displayName ?? (user.email != null ? user.email!.split('@').first : 'User');
         await box.put('user_name', displayName);
 
+        final profilePicPath = box.get('profile_picture_path') as String?;
+        final profilePicUrl = box.get('profile_picture_url') as String?;
+
         debugPrint('Google Sign-In: Starting Firestore sync...');
         state = AuthState(
           status: AuthStatus.syncing,
           email: user.email,
           displayName: displayName,
+          profilePicPath: profilePicPath,
+          profilePicUrl: profilePicUrl,
         );
         try {
           await _syncService.syncCloudToLocal()
               .timeout(const Duration(seconds: 20));
         } catch (_) {}
 
+        final updatedPath = box.get('profile_picture_path') as String?;
+        final updatedUrl = box.get('profile_picture_url') as String?;
+
         state = AuthState(
           status: AuthStatus.authenticated,
           email: user.email,
-          displayName: displayName,
+          displayName: box.get('user_name', defaultValue: displayName) as String?,
+          profilePicPath: updatedPath,
+          profilePicUrl: updatedUrl,
         );
         return true;
       } else {
@@ -289,6 +328,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = AuthState(
       status: AuthStatus.guest,
       displayName: 'Guest User',
+      profilePicPath: null,
+      profilePicUrl: null,
     );
   }
 
@@ -310,5 +351,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
     final box = Hive.box(HiveHelper.settingsBox);
     await box.clear();
     state = AuthState(status: AuthStatus.unauthenticated);
+  }
+
+  void updateProfileDetails({
+    String? displayName,
+    String? profilePicPath,
+    String? profilePicUrl,
+    bool clearPhoto = false,
+  }) {
+    state = AuthState(
+      status: state.status,
+      email: state.email,
+      displayName: displayName ?? state.displayName,
+      profilePicPath: clearPhoto ? null : (profilePicPath ?? state.profilePicPath),
+      profilePicUrl: clearPhoto ? null : (profilePicUrl ?? state.profilePicUrl),
+      errorMessage: state.errorMessage,
+    );
   }
 }

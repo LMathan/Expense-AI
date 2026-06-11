@@ -34,6 +34,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   late Animation<double> _addBtnScale;
   StreamSubscription? _groupsSubscription;
   StreamSubscription? _transactionsSubscription;
+  StreamSubscription? _profileSubscription;
 
   final List<Widget> _tabs = [
     const HomeTab(),
@@ -64,6 +65,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     _addBtnCtrl.dispose();
     _groupsSubscription?.cancel();
     _transactionsSubscription?.cancel();
+    _profileSubscription?.cancel();
     super.dispose();
   }
 
@@ -87,6 +89,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       _transactionsSubscription = syncService.listenToTransactions(() {
         if (mounted) {
           ref.read(transactionProvider.notifier).loadTransactions();
+        }
+      });
+      _profileSubscription = syncService.listenToUserProfile((data) {
+        if (mounted) {
+          final name = data['displayName'] as String? ?? 'User';
+          final sBox = Hive.box(HiveHelper.settingsBox);
+          final path = sBox.get('profile_picture_path') as String?;
+          final url = sBox.get('profile_picture_url') as String?;
+          ref.read(authProvider.notifier).updateProfileDetails(
+            displayName: name,
+            profilePicPath: path,
+            profilePicUrl: url,
+            clearPhoto: (url == null && path == null),
+          );
         }
       });
     }
@@ -549,14 +565,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   }
 }
 
-class OnboardingProfileSetupDialog extends StatefulWidget {
+class OnboardingProfileSetupDialog extends ConsumerStatefulWidget {
   const OnboardingProfileSetupDialog({super.key});
 
   @override
-  State<OnboardingProfileSetupDialog> createState() => _OnboardingProfileSetupDialogState();
+  ConsumerState<OnboardingProfileSetupDialog> createState() => _OnboardingProfileSetupDialogState();
 }
 
-class _OnboardingProfileSetupDialogState extends State<OnboardingProfileSetupDialog> {
+class _OnboardingProfileSetupDialogState extends ConsumerState<OnboardingProfileSetupDialog> {
   final _controller = TextEditingController();
   final FirestoreSyncService _syncService = FirestoreSyncService();
   String? _imagePath;
@@ -641,6 +657,11 @@ class _OnboardingProfileSetupDialogState extends State<OnboardingProfileSetupDia
       // Immediately upload the profile picture to Firebase Storage and update Firestore/Hive url.
       await _syncService.syncProfilePicture(imagePath);
     }
+
+    ref.read(authProvider.notifier).updateProfileDetails(
+      displayName: username,
+      profilePicPath: imagePath,
+    );
 
     await _syncService.updateProfileName(
       username,

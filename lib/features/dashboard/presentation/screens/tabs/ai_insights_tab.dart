@@ -175,12 +175,12 @@ class _AiInsightsTabState extends State<AiInsightsTab> {
                             Expanded(
                               child: TextField(
                                 controller: _queryController,
-                                style: const TextStyle(color: Colors.white),
-                                decoration: const InputDecoration(
+                                style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
+                                decoration: InputDecoration(
                                   hintText:
                                       'Ask advisor, e.g. "Can I buy a laptop?"',
                                   hintStyle: TextStyle(
-                                    color: AppColors.textSecondaryDark,
+                                    color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
                                     fontSize: 13,
                                   ),
                                   border: InputBorder.none,

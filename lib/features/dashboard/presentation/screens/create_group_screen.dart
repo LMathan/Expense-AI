@@ -150,39 +150,67 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [AppColors.primaryPurple, AppColors.electricBlue],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
+                      gradient: isDark
+                          ? const LinearGradient(
+                              colors: [AppColors.primaryPurple, AppColors.electricBlue],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            )
+                          : LinearGradient(
+                              colors: [
+                                AppColors.primaryPurple.withValues(alpha: 0.12),
+                                AppColors.electricBlue.withValues(alpha: 0.06),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
                       borderRadius: BorderRadius.circular(24),
+                      border: isDark
+                          ? null
+                          : Border.all(color: AppColors.primaryPurple.withValues(alpha: 0.2), width: 1),
                     ),
                     child: Column(
                       children: [
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.15)
+                                : AppColors.primaryPurple.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.group_rounded, color: Colors.white, size: 36),
+                          child: Icon(
+                            Icons.group_rounded,
+                            color: isDark ? Colors.white : AppColors.primaryPurple,
+                            size: 36,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         TextField(
                           controller: _nameController,
                           textAlign: TextAlign.center,
                           style: GoogleFonts.outfit(
-                            color: Colors.white,
+                            color: isDark ? Colors.white : AppColors.textPrimaryLight,
                             fontSize: 22,
                             fontWeight: FontWeight.bold,
                           ),
                           decoration: InputDecoration(
                             hintText: 'Group Name',
-                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 20),
+                            hintStyle: TextStyle(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.6)
+                                  : AppColors.textSecondaryLight.withValues(alpha: 0.6),
+                              fontSize: 20,
+                            ),
                             border: InputBorder.none,
                             enabledBorder: InputBorder.none,
                             focusedBorder: UnderlineInputBorder(
-                              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.4), width: 1.5),
+                              borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.4)
+                                    : AppColors.primaryPurple.withValues(alpha: 0.4),
+                                width: 1.5,
+                              ),
                             ),
                             isDense: true,
                             contentPadding: const EdgeInsets.symmetric(vertical: 4),
@@ -191,7 +219,10 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                         const SizedBox(height: 4),
                         Text(
                           '${_selectedMembers.length} member${_selectedMembers.length != 1 ? 's' : ''}',
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13),
+                          style: TextStyle(
+                            color: isDark ? Colors.white.withValues(alpha: 0.7) : AppColors.textSecondaryLight,
+                            fontSize: 13,
+                          ),
                         ),
                       ],
                     ),

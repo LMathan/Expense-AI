@@ -58,6 +58,7 @@ class UpdateService {
               builder: (progressContext) => _DownloadProgressDialog(
                 apkUrl: apkUrl,
                 isForced: isForced,
+                providerAuthority: '${packageInfo.packageName}.provider',
               ),
             );
           }
@@ -256,10 +257,12 @@ class _UpdateDialog extends StatelessWidget {
 class _DownloadProgressDialog extends StatefulWidget {
   final String apkUrl;
   final bool isForced;
+  final String providerAuthority;
 
   const _DownloadProgressDialog({
     required this.apkUrl,
     required this.isForced,
+    required this.providerAuthority,
   });
 
   @override
@@ -289,6 +292,7 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
           .execute(
         widget.apkUrl,
         destinationFilename: 'espenseai-update.apk',
+        androidProviderAuthority: widget.providerAuthority,
       )
           .listen(
         (OtaEvent event) {

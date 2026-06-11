@@ -18,6 +18,8 @@ import 'package:espenseai/features/dashboard/presentation/screens/tabs/home_tab.
 import 'package:intl/intl.dart';
 import 'package:espenseai/core/utils/category_emoji_helper.dart';
 import 'package:espenseai/core/widgets/vector_illustrations.dart';
+import 'package:espenseai/core/utils/transaction_permissions.dart';
+import 'package:espenseai/features/auth/presentation/providers/auth_provider.dart';
 
 class GroupDetailsScreen extends ConsumerStatefulWidget {
   final String groupId;
@@ -946,8 +948,584 @@ class _GroupTransactionHistory extends ConsumerWidget {
                   ),
                 ),
               ],
+              if (canEditTransaction(tx, ref)) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      _confirmDeleteTransaction(context, ref, tx, isDark, textColor, textSecondary);
+                    },
+                    icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                    label: const Text(
+                      'Delete Expense',
+                      style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.redAccent),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
+        );
+      },
+    );
+  }
+
+  void _confirmDeleteTransaction(BuildContext context, WidgetRef ref, TransactionModel tx,
+      bool isDark, Color textColor, Color textSecondary) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? AppColors.cardDark : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Delete Expense?',
+            style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight, fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to delete this expense from the group?',
+            style: TextStyle(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx); // close dialog
+              Navigator.pop(context); // close bottom sheet
+              await ref.read(transactionProvider.notifier).deleteTransaction(tx.id);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Expense deleted successfully'), backgroundColor: AppColors.accentPink),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showGroupSummary(BuildContext context, WidgetRef ref, List<TransactionModel> display, GroupModel group) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    final bgColor = isDark ? AppColors.bgDark : Colors.white;
+
+    // Filter unsettled transactions for this group
+    final unsettledTxs = display.where((tx) => !tx.isSettled).toList();
+
+    // Map member email to net balance
+    final Map<String, double> balances = {};
+    for (var email in group.memberEmails) {
+      balances[email] = 0.0;
+    }
+
+    for (var tx in unsettledTxs) {
+      final payerEmail = tx.paidByEmail.isNotEmpty ? tx.paidByEmail : (group.createdBy.isEmpty ? group.memberEmails.first : group.createdBy);
+      final splitWith = tx.splitWith;
+      if (splitWith.isEmpty) continue;
+
+      final totalSplitCount = splitWith.length + 1;
+      final perHeadAmount = tx.totalAmount > 0 
+          ? tx.totalAmount / totalSplitCount 
+          : tx.amount;
+
+      // Payer gets credited
+      final payerCredit = perHeadAmount * splitWith.length;
+      balances[payerEmail] = (balances[payerEmail] ?? 0.0) + payerCredit;
+
+      // Split members get debited
+      for (var email in splitWith) {
+        balances[email] = (balances[email] ?? 0.0) - perHeadAmount;
+      }
+    }
+
+    // Debt Simplifier algorithm
+    final List<MapEntry<String, double>> debtors = [];
+    final List<MapEntry<String, double>> creditors = [];
+
+    balances.forEach((email, val) {
+      if (val < -0.01) {
+        debtors.add(MapEntry(email, val));
+      } else if (val > 0.01) {
+        creditors.add(MapEntry(email, val));
+      }
+    });
+
+    debtors.sort((a, b) => a.value.compareTo(b.value)); // largest debt first
+    creditors.sort((a, b) => b.value.compareTo(a.value)); // largest credit first
+
+    final List<SettlementItem> settlements = [];
+    int debtorIdx = 0;
+    int creditorIdx = 0;
+    final Map<String, double> tempBalances = Map.from(balances);
+
+    while (debtorIdx < debtors.length && creditorIdx < creditors.length) {
+      final debtorEmail = debtors[debtorIdx].key;
+      final creditorEmail = creditors[creditorIdx].key;
+
+      final double debtorOwes = -tempBalances[debtorEmail]!;
+      final double creditorOwed = tempBalances[creditorEmail]!;
+
+      if (debtorOwes <= 0.01) {
+        debtorIdx++;
+        continue;
+      }
+      if (creditorOwed <= 0.01) {
+        creditorIdx++;
+        continue;
+      }
+
+      final double settleAmount = debtorOwes < creditorOwed ? debtorOwes : creditorOwed;
+
+      settlements.add(SettlementItem(
+        fromEmail: debtorEmail,
+        toEmail: creditorEmail,
+        amount: settleAmount,
+      ));
+
+      tempBalances[debtorEmail] = tempBalances[debtorEmail]! + settleAmount;
+      tempBalances[creditorEmail] = tempBalances[creditorEmail]! - settleAmount;
+
+      if (tempBalances[debtorEmail]! >= -0.01) {
+        debtorIdx++;
+      }
+      if (tempBalances[creditorEmail]! <= 0.01) {
+        creditorIdx++;
+      }
+    }
+
+    // Helper functions to resolve details
+    String getMemberName(String email) {
+      final idx = group.memberEmails.indexOf(email);
+      if (idx != -1 && idx < group.memberNames.length) {
+        return group.memberNames[idx];
+      }
+      return email.split('@').first;
+    }
+
+    String getMemberUid(String email) {
+      final idx = group.memberEmails.indexOf(email);
+      if (idx != -1 && idx < group.memberUids.length) {
+        return group.memberUids[idx];
+      }
+      return '';
+    }
+
+    Color getMemberColor(String email) {
+      final idx = group.memberEmails.indexOf(email);
+      final colors = [
+        AppColors.primaryPurple,
+        AppColors.electricBlue,
+        AppColors.emeraldGreen,
+        AppColors.accentPink,
+        AppColors.accentOrange,
+      ];
+      return colors[idx == -1 ? 0 : idx % colors.length];
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setStateSheet) {
+            return Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.85,
+              ),
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.cardDark : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Handle bar
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  
+                  // Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '📊 Settlement Summary',
+                        style: GoogleFonts.outfit(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: textColor,
+                        ),
+                      ),
+                      if (unsettledTxs.isNotEmpty)
+                        TextButton(
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (dialogCtx) => AlertDialog(
+                                backgroundColor: isDark ? AppColors.cardDark : Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                title: const Text('Mark All Settled?'),
+                                content: const Text('This will mark all current group expenses as settled. Balance totals will reset to zero.'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(dialogCtx),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () async {
+                                      Navigator.pop(dialogCtx); // close dialog
+                                      Navigator.pop(ctx); // close bottom sheet
+                                      
+                                      // Settle all transactions
+                                      for (var tx in unsettledTxs) {
+                                        final updatedTx = tx.copyWith(isSettled: true);
+                                        await ref.read(transactionProvider.notifier).editTransaction(updatedTx);
+                                      }
+                                      
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('All group expenses marked as settled!'),
+                                            backgroundColor: AppColors.emeraldGreen,
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.emeraldGreen, foregroundColor: Colors.white),
+                                    child: const Text('Confirm'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.redAccent,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          ),
+                          child: const Text('Settle All', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Net balances card
+                          Text(
+                            'NET BALANCES',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primaryPurple,
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isDark ? AppColors.bgDark.withValues(alpha: 0.5) : Colors.grey[50],
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+                            ),
+                            child: ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: group.memberEmails.length,
+                              separatorBuilder: (_, __) => Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12),
+                              itemBuilder: (context, i) {
+                                final email = group.memberEmails[i];
+                                final name = group.memberNames[i];
+                                final uid = group.memberUids.length > i ? group.memberUids[i] : '';
+                                final balance = balances[email] ?? 0.0;
+                                final initials = name.trim().split(' ').take(2).map((w) => w.isNotEmpty ? w[0].toUpperCase() : '').join();
+                                final avatarColor = getMemberColor(email);
+
+                                String balanceText;
+                                Color balanceColor;
+                                if (balance > 0.01) {
+                                  balanceText = 'Owed ₹${balance.toStringAsFixed(2)}';
+                                  balanceColor = AppColors.emeraldGreen;
+                                } else if (balance < -0.01) {
+                                  balanceText = 'Owes ₹${(-balance).toStringAsFixed(2)}';
+                                  balanceColor = AppColors.accentOrange;
+                                } else {
+                                  balanceText = 'Settled';
+                                  balanceColor = textSecondary;
+                                }
+
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                  child: Row(
+                                    children: [
+                                      GroupMemberAvatar(
+                                        uid: uid,
+                                        initials: initials,
+                                        avatarColor: avatarColor,
+                                        radius: 18,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              name,
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 13,
+                                                color: textColor,
+                                              ),
+                                            ),
+                                            Text(email, style: TextStyle(fontSize: 10, color: textSecondary)),
+                                          ],
+                                        ),
+                                      ),
+                                      Text(
+                                        balanceText,
+                                        style: TextStyle(
+                                          color: balanceColor,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          
+                          // Suggested Settlements
+                          Text(
+                            'SUGGESTED SETTLEMENTS',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.electricBlue,
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          
+                          if (settlements.isEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+                              decoration: BoxDecoration(
+                                color: isDark ? AppColors.bgDark.withValues(alpha: 0.3) : Colors.grey[50],
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+                              ),
+                              child: Column(
+                                children: [
+                                  const Text('🎉', style: TextStyle(fontSize: 36)),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'All settled up!',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: textColor, fontSize: 15),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'No payments needed for this group.',
+                                    style: TextStyle(color: textSecondary, fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: settlements.length,
+                              separatorBuilder: (_, __) => const SizedBox(height: 10),
+                              itemBuilder: (context, idx) {
+                                final item = settlements[idx];
+                                final fromName = getMemberName(item.fromEmail);
+                                final toName = getMemberName(item.toEmail);
+                                final fromUid = getMemberUid(item.fromEmail);
+                                final toUid = getMemberUid(item.toEmail);
+                                
+                                final fromInitials = fromName.trim().split(' ').take(2).map((w) => w.isNotEmpty ? w[0].toUpperCase() : '').join();
+                                final toInitials = toName.trim().split(' ').take(2).map((w) => w.isNotEmpty ? w[0].toUpperCase() : '').join();
+                                
+                                final fromColor = getMemberColor(item.fromEmail);
+                                final toColor = getMemberColor(item.toEmail);
+
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? AppColors.bgDark.withValues(alpha: 0.5) : Colors.grey[50],
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      // Debtor
+                                      Expanded(
+                                        child: Row(
+                                          children: [
+                                            GroupMemberAvatar(
+                                              uid: fromUid,
+                                              initials: fromInitials,
+                                              avatarColor: fromColor,
+                                              radius: 16,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                fromName,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textColor),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      
+                                      // Connection text
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                                        child: Column(
+                                          children: [
+                                            const Icon(Icons.arrow_forward_rounded, size: 16, color: AppColors.electricBlue),
+                                            Text(
+                                              '₹${item.amount.toStringAsFixed(0)}',
+                                              style: GoogleFonts.outfit(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                                color: AppColors.accentPink,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      
+                                      // Creditor
+                                      Expanded(
+                                        child: Row(
+                                          children: [
+                                            GroupMemberAvatar(
+                                              uid: toUid,
+                                              initials: toInitials,
+                                              avatarColor: toColor,
+                                              radius: 16,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                toName,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textColor),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      
+                                      const SizedBox(width: 8),
+                                      
+                                      // Record Payment action
+                                      ElevatedButton(
+                                        onPressed: () {
+                                          showDialog(
+                                            context: context,
+                                            builder: (dialogCtx) => AlertDialog(
+                                              backgroundColor: isDark ? AppColors.cardDark : Colors.white,
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                              title: const Text('Record Settlement?'),
+                                              content: Text('Mark that $fromName paid ₹${item.amount.toStringAsFixed(0)} to $toName?'),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(dialogCtx),
+                                                  child: const Text('Cancel'),
+                                                ),
+                                                ElevatedButton(
+                                                  onPressed: () async {
+                                                    Navigator.pop(dialogCtx); // close dialog
+                                                    Navigator.pop(ctx); // close bottom sheet
+                                                    
+                                                    // Add Settlement transaction
+                                                    await ref.read(transactionProvider.notifier).addTransaction(
+                                                      amount: item.amount,
+                                                      category: 'Settlement',
+                                                      merchant: 'Settlement Payment',
+                                                      notes: 'Settlement: $fromName paid $toName',
+                                                      paymentMethod: 'Cash',
+                                                      date: DateTime.now(),
+                                                      splitWith: [item.toEmail],
+                                                      isSettled: true,
+                                                      paidByEmail: item.fromEmail,
+                                                      totalAmount: item.amount,
+                                                      groupId: group.id,
+                                                    );
+                                                    
+                                                    if (context.mounted) {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        SnackBar(
+                                                          content: Text('Recorded settlement of ₹${item.amount.toStringAsFixed(0)}!'),
+                                                          backgroundColor: AppColors.emeraldGreen,
+                                                        ),
+                                                      );
+                                                    }
+                                                  },
+                                                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryPurple, foregroundColor: Colors.white),
+                                                  child: const Text('Record'),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        },
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppColors.primaryPurple.withValues(alpha: 0.1),
+                                          foregroundColor: AppColors.primaryPurple,
+                                          elevation: 0,
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                          minimumSize: Size.zero,
+                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                        child: Text(
+                                          'Settle',
+                                          style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -1006,6 +1584,25 @@ class _GroupTransactionHistory extends ConsumerWidget {
                 ),
               ),
             ],
+            const Spacer(),
+            if (display.isNotEmpty)
+              TextButton.icon(
+                onPressed: () => _showGroupSummary(context, ref, display, group),
+                icon: const Text('📊', style: TextStyle(fontSize: 14)),
+                label: Text(
+                  'Summary',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primaryPurple,
+                  ),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  backgroundColor: AppColors.primaryPurple.withValues(alpha: 0.08),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
           ],
         ),
         const SizedBox(height: 14),
@@ -1171,7 +1768,7 @@ class _GroupTransactionHistory extends ConsumerWidget {
   }
 }
 
-class GroupMemberAvatar extends StatefulWidget {
+class GroupMemberAvatar extends ConsumerWidget {
   final String uid;
   final String initials;
   final Color avatarColor;
@@ -1186,118 +1783,84 @@ class GroupMemberAvatar extends StatefulWidget {
   });
 
   @override
-  State<GroupMemberAvatar> createState() => _GroupMemberAvatarState();
-}
-
-class _GroupMemberAvatarState extends State<GroupMemberAvatar> {
-  static final Map<String, String?> _avatarCache = {}; // Global memory cache for member avatars
-  bool _loading = false;
-  String? _photoUrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadAvatar();
-  }
-
-  void _loadAvatar() async {
+  Widget build(BuildContext context, WidgetRef ref) {
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    if (widget.uid.isEmpty) return;
 
-    if (widget.uid == currentUid) {
-      // Load from local Hive
-      final box = Hive.box(HiveHelper.settingsBox);
-      final localPath = box.get('profile_picture_path') as String?;
-      final localUrl = box.get('profile_picture_url') as String?;
-      if (mounted) {
-        setState(() {
-          _photoUrl = localPath ?? localUrl;
-        });
-      }
-      return;
+    if (uid.isEmpty) {
+      return _buildPlaceholder();
     }
 
-    // Check memory cache first
-    if (_avatarCache.containsKey(widget.uid)) {
-      if (mounted) {
-        setState(() {
-          _photoUrl = _avatarCache[widget.uid];
-        });
-      }
-      return;
-    }
+    if (uid == currentUid) {
+      final authState = ref.watch(authProvider);
+      final profilePicPath = authState.profilePicPath;
+      final profilePicUrl = authState.profilePicUrl;
 
-    // Fetch from Firestore
-    setState(() {
-      _loading = true;
-    });
-
-    try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(widget.uid).get();
-      if (doc.exists) {
-        final data = doc.data();
-        final url = data?['photoUrl'] as String?;
-        _avatarCache[widget.uid] = url;
-        if (mounted) {
-          setState(() {
-            _photoUrl = url;
-            _loading = false;
-          });
+      if ((profilePicPath != null && profilePicPath.isNotEmpty) || (profilePicUrl != null && profilePicUrl.isNotEmpty)) {
+        final photoUrl = profilePicPath ?? profilePicUrl;
+        ImageProvider imageProvider;
+        if (photoUrl!.startsWith('data:image')) {
+          final base64String = photoUrl.split('base64,').last;
+          imageProvider = MemoryImage(base64Decode(base64String));
+        } else if (!photoUrl.startsWith('http') && File(photoUrl).existsSync()) {
+          imageProvider = FileImage(File(photoUrl));
+        } else {
+          imageProvider = NetworkImage(photoUrl);
         }
-      } else {
-        _avatarCache[widget.uid] = null;
-        if (mounted) {
-          setState(() {
-            _loading = false;
-          });
-        }
+
+        return CircleAvatar(
+          radius: radius,
+          backgroundImage: imageProvider,
+          backgroundColor: Colors.transparent,
+        );
       }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
+      return _buildPlaceholder();
     }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasData && snapshot.data!.exists) {
+          final data = snapshot.data!.data();
+          final photoUrl = data?['photoUrl'] as String?;
+          if (photoUrl != null && photoUrl.isNotEmpty) {
+            ImageProvider imageProvider;
+            if (photoUrl.startsWith('data:image')) {
+              final base64String = photoUrl.split('base64,').last;
+              imageProvider = MemoryImage(base64Decode(base64String));
+            } else if (!photoUrl.startsWith('http') && File(photoUrl).existsSync()) {
+              imageProvider = FileImage(File(photoUrl));
+            } else {
+              imageProvider = NetworkImage(photoUrl);
+            }
+            return CircleAvatar(
+              radius: radius,
+              backgroundImage: imageProvider,
+              backgroundColor: Colors.transparent,
+            );
+          }
+        }
+        return _buildPlaceholder();
+      },
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_photoUrl != null && _photoUrl!.isNotEmpty) {
-      ImageProvider imageProvider;
-      if (_photoUrl!.startsWith('data:image')) {
-        final base64String = _photoUrl!.split('base64,').last;
-        imageProvider = MemoryImage(base64Decode(base64String));
-      } else if (!_photoUrl!.startsWith('http') && File(_photoUrl!).existsSync()) {
-        imageProvider = FileImage(File(_photoUrl!));
-      } else {
-        imageProvider = NetworkImage(_photoUrl!);
-      }
-
-      return CircleAvatar(
-        radius: widget.radius,
-        backgroundImage: imageProvider,
-        backgroundColor: Colors.transparent,
-      );
-    }
-
-    // Fallback: Initials text avatar
+  Widget _buildPlaceholder() {
     return Container(
-      width: widget.radius * 2,
-      height: widget.radius * 2,
+      width: radius * 2,
+      height: radius * 2,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            widget.avatarColor.withOpacity(0.9),
-            widget.avatarColor.withOpacity(0.5),
+            avatarColor.withOpacity(0.9),
+            avatarColor.withOpacity(0.5),
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: widget.avatarColor.withOpacity(0.3),
+            color: avatarColor.withOpacity(0.3),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -1305,13 +1868,25 @@ class _GroupMemberAvatarState extends State<GroupMemberAvatar> {
       ),
       alignment: Alignment.center,
       child: Text(
-        widget.initials.isNotEmpty ? widget.initials : 'U',
+        initials.isNotEmpty ? initials : 'U',
         style: TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.bold,
-          fontSize: widget.radius * 0.62,
+          fontSize: radius * 0.62,
         ),
       ),
     );
   }
+}
+
+class SettlementItem {
+  final String fromEmail;
+  final String toEmail;
+  final double amount;
+
+  SettlementItem({
+    required this.fromEmail,
+    required this.toEmail,
+    required this.amount,
+  });
 }

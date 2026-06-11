@@ -209,12 +209,12 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                   ],
                   child: Column(
                     children: [
-                      const Text(
+                      Text(
                         'ENTER AMOUNT',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: AppColors.textSecondaryDark,
+                          color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
                           letterSpacing: 1.2,
                         ),
                       ),
@@ -223,12 +223,12 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          const Text(
+                          Text(
                             '₹',
                             style: TextStyle(
                               fontSize: 40,
                               fontWeight: FontWeight.w900,
-                              color: Colors.white,
+                              color: isDark ? Colors.white : AppColors.textPrimaryLight,
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -241,15 +241,15 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                                     decimal: true,
                                   ),
                               textAlign: TextAlign.center,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 36,
                                 fontWeight: FontWeight.w900,
-                                color: Colors.white,
+                                color: isDark ? Colors.white : AppColors.textPrimaryLight,
                               ),
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 border: InputBorder.none,
                                 hintText: '0',
-                                hintStyle: TextStyle(color: Colors.white24),
+                                hintStyle: TextStyle(color: isDark ? Colors.white24 : Colors.black38),
                               ),
                               validator: (value) {
                                 if (value == null || value.isEmpty)
@@ -338,11 +338,11 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                     children: [
                       TextFormField(
                         controller: _merchantController,
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
                         decoration: InputDecoration(
                           labelText: 'Merchant Name',
-                          labelStyle: const TextStyle(
-                            color: AppColors.textSecondaryDark,
+                          labelStyle: TextStyle(
+                            color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
                             fontSize: 13,
                           ),
                           prefixIcon: const Icon(
@@ -354,8 +354,15 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
                             borderSide: const BorderSide(
-                              color: AppColors.borderDark,
+                              color: AppColors.primaryPurple,
+                              width: 2.0,
                             ),
                           ),
                         ),
@@ -364,11 +371,11 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
 
                       TextFormField(
                         controller: _notesController,
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
                         decoration: InputDecoration(
                           labelText: 'Add Notes / Description',
-                          labelStyle: const TextStyle(
-                            color: AppColors.textSecondaryDark,
+                          labelStyle: TextStyle(
+                            color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
                             fontSize: 13,
                           ),
                           prefixIcon: const Icon(
@@ -380,8 +387,15 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
                             borderSide: const BorderSide(
-                              color: AppColors.borderDark,
+                              color: AppColors.primaryPurple,
+                              width: 2.0,
                             ),
                           ),
                         ),
@@ -409,11 +423,11 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
+                                  Text(
                                     'DATE',
                                     style: TextStyle(
                                       fontSize: 9,
-                                      color: AppColors.textSecondaryDark,
+                                      color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
@@ -421,10 +435,10 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                                     DateFormat(
                                       'MMM dd, yyyy',
                                     ).format(_selectedDate),
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.white,
+                                      color: isDark ? Colors.white : AppColors.textPrimaryLight,
                                     ),
                                   ),
                                 ],
@@ -436,7 +450,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                       Container(
                         width: 1,
                         height: 36,
-                        color: AppColors.borderDark,
+                        color: isDark ? AppColors.borderDark : AppColors.borderLight,
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -451,23 +465,24 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   'METHOD',
                                   style: TextStyle(
                                     fontSize: 9,
-                                    color: AppColors.textSecondaryDark,
+                                    color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                                 DropdownButton<String>(
                                   value: _selectedPaymentMethod,
-                                  dropdownColor: AppColors.cardDark,
+                                  dropdownColor: isDark ? AppColors.cardDark : Colors.white,
+                                  iconEnabledColor: isDark ? Colors.white : AppColors.textPrimaryLight,
                                   isDense: true,
                                   underline: const SizedBox(),
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.white,
+                                    color: isDark ? Colors.white : AppColors.textPrimaryLight,
                                   ),
                                   items: _paymentMethods.map((m) {
                                     return DropdownMenuItem(
@@ -479,7 +494,7 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                                               style: const TextStyle(
                                                   fontSize: 15)),
                                           const SizedBox(width: 6),
-                                          Text(m['name']!),
+                                          Text(m['name']!, style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight)),
                                         ],
                                       ),
                                     );

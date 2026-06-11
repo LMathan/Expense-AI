@@ -49,6 +49,12 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     if (picked != null) {
       final box = Hive.box(HiveHelper.settingsBox);
       await box.put('profile_picture_path', picked.path);
+      
+      // Update local Riverpod state immediately
+      ref.read(authProvider.notifier).updateProfileDetails(
+        profilePicPath: picked.path,
+      );
+
       setState(() {});
       // Upload to Firebase Storage (replaces old file — no extra storage used)
       FirestoreSyncService().syncProfilePicture(picked.path);
@@ -145,6 +151,12 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                   final box = Hive.box(HiveHelper.settingsBox);
                   await box.delete('profile_picture_path');
                   await box.delete('profile_picture_url');
+                  
+                  // Update local Riverpod state immediately
+                  ref.read(authProvider.notifier).updateProfileDetails(
+                    clearPhoto: true,
+                  );
+
                   // Delete from Firebase Storage and Firestore
                   FirestoreSyncService().removeProfilePicture();
                   setState(() {});
@@ -498,6 +510,8 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                             final sBox = Hive.box(HiveHelper.settingsBox);
                             await sBox.put('user_name', newName);
                             
+                            ref.read(authProvider.notifier).updateProfileDetails(displayName: newName);
+
                             await syncService.updateProfileName(newName);
                             
                             if (mounted) {
@@ -549,10 +563,12 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     final sBox = Hive.box(HiveHelper.settingsBox);
     final int xp = sBox.get('user_xp', defaultValue: 0) as int;
     final int level = sBox.get('user_level', defaultValue: 1) as int;
-    final String name = sBox.get('user_name', defaultValue: 'User') as String;
-    final String email = sBox.get('user_email', defaultValue: '') as String;
-    final String? profilePicPath = sBox.get('profile_picture_path') as String?;
-    final String? profilePicUrl = sBox.get('profile_picture_url') as String?;
+    
+    final authState = ref.watch(authProvider);
+    final String name = authState.displayName ?? 'User';
+    final String email = authState.email ?? '';
+    final String? profilePicPath = authState.profilePicPath;
+    final String? profilePicUrl = authState.profilePicUrl;
     final ImageProvider imageProvider;
     if (profilePicPath != null && profilePicPath.startsWith('data:image')) {
       final base64String = profilePicPath.split('base64,').last;

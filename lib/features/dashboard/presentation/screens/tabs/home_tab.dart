@@ -23,6 +23,7 @@ import 'package:espenseai/features/expense/presentation/screens/expense_history_
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:espenseai/core/models/group_model.dart';
 import 'package:espenseai/core/utils/transaction_permissions.dart';
+import 'package:espenseai/features/auth/presentation/providers/auth_provider.dart';
 import '../group_details_screen.dart';
 import '../create_group_screen.dart';
 import 'profile_tab.dart';
@@ -391,13 +392,32 @@ class _HomeTabState extends ConsumerState<HomeTab> {
     final progress = budget.monthlyIncome > 0 ? (currentMonthSpent / budget.monthlyIncome).clamp(0.0, 1.0) : 0.0;
     final weeklyTrend = [1200.0, 4500.0, 1800.0, 950.0, 3200.0, 450.0, 2000.0];
 
-    final String? profilePicPath = settingsBox.get('profile_picture_path') as String?;
+    final hour = DateTime.now().hour;
+    final String greeting;
+    if (hour < 12) {
+      greeting = 'Good Morning ☀️,';
+    } else if (hour < 17) {
+      greeting = 'Good Afternoon 🌤️,';
+    } else {
+      greeting = 'Good Evening 🌙,';
+    }
+
+    final authState = ref.watch(authProvider);
+    final String? profilePicPath = authState.profilePicPath;
+    final String? profilePicUrl = authState.profilePicUrl;
     final ImageProvider imageProvider;
     if (profilePicPath != null && profilePicPath.startsWith('data:image')) {
       final base64String = profilePicPath.split('base64,').last;
       imageProvider = MemoryImage(base64Decode(base64String));
-    } else if (profilePicPath != null && File(profilePicPath).existsSync()) {
+    } else if (profilePicPath != null && !profilePicPath.startsWith('http') && File(profilePicPath).existsSync()) {
       imageProvider = FileImage(File(profilePicPath));
+    } else if (profilePicPath != null && profilePicPath.startsWith('http')) {
+      imageProvider = NetworkImage(profilePicPath);
+    } else if (profilePicUrl != null && profilePicUrl.startsWith('data:image')) {
+      final base64String = profilePicUrl.split('base64,').last;
+      imageProvider = MemoryImage(base64Decode(base64String));
+    } else if (profilePicUrl != null) {
+      imageProvider = NetworkImage(profilePicUrl);
     } else {
       imageProvider = const NetworkImage('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150');
     }
@@ -476,7 +496,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Good Morning,',
+                      greeting,
                       style: AppTextStyles.bodyMedium(isDark: isDark).copyWith(
                         color: AppColors.textSecondaryDark,
                       ),
@@ -1637,12 +1657,12 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
             TextField(
               controller: _amountController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
               decoration: InputDecoration(
                 labelText: 'Total Amount (₹)',
-                labelStyle: const TextStyle(color: AppColors.textSecondaryDark),
+                labelStyle: TextStyle(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight),
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.05),
+                fillColor: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
               onChanged: (val) {
@@ -1654,12 +1674,12 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
             const SizedBox(height: 12),
             TextField(
               controller: _descController,
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
               decoration: InputDecoration(
                 labelText: 'Description / Merchant',
-                labelStyle: const TextStyle(color: AppColors.textSecondaryDark),
+                labelStyle: TextStyle(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight),
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.05),
+                fillColor: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
             ),
@@ -1670,16 +1690,22 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
                   child: DropdownButtonFormField<String>(
                     value: _category,
                     dropdownColor: isDark ? AppColors.cardDark : Colors.white,
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
                     decoration: InputDecoration(
                       labelText: 'Category',
                       labelStyle: TextStyle(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight),
                       filled: true,
-                      fillColor: (isDark ? Colors.white : Colors.black).withOpacity(0.05),
+                      fillColor: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                     items: ['Food', 'Travel', 'Shopping', 'Entertainment', 'Bills', 'Healthcare', 'Education', 'Rent', 'EMI', 'Fuel', 'Other']
-                        .map((cat) => DropdownMenuItem(value: cat, child: Text('${getCategoryEmoji(cat)} $cat')))
+                        .map((cat) => DropdownMenuItem(
+                              value: cat,
+                              child: Text(
+                                '${getCategoryEmoji(cat)} $cat',
+                                style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
+                              ),
+                            ))
                         .toList(),
                     onChanged: (val) {
                       if (val != null) {
@@ -1695,16 +1721,33 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
                   child: DropdownButtonFormField<String>(
                     value: _paymentMethod,
                     dropdownColor: isDark ? AppColors.cardDark : Colors.white,
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
                     decoration: InputDecoration(
                       labelText: 'Payment Method',
                       labelStyle: TextStyle(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight),
                       filled: true,
-                      fillColor: (isDark ? Colors.white : Colors.black).withOpacity(0.05),
+                      fillColor: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
-                    items: ['UPI', 'Card', 'Cash', 'Net Banking']
-                        .map((pm) => DropdownMenuItem(value: pm, child: Text(pm)))
+                    items: [
+                      {'name': 'UPI', 'emoji': '📱'},
+                      {'name': 'Card', 'emoji': '💳'},
+                      {'name': 'Cash', 'emoji': '💵'},
+                      {'name': 'Net Banking', 'emoji': '🏦'},
+                    ]
+                        .map((pm) => DropdownMenuItem(
+                              value: pm['name']!,
+                              child: Row(
+                                children: [
+                                  Text(pm['emoji']!, style: const TextStyle(fontSize: 16)),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    pm['name']!,
+                                    style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
+                                  ),
+                                ],
+                              ),
+                            ))
                         .toList(),
                     onChanged: (val) {
                       if (val != null) {
@@ -1721,12 +1764,12 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
             DropdownButtonFormField<String>(
               value: _whoPaidUid,
               dropdownColor: isDark ? AppColors.cardDark : Colors.white,
-              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
               decoration: InputDecoration(
                 labelText: 'Who Paid?',
                 labelStyle: TextStyle(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight),
                 filled: true,
-                fillColor: (isDark ? Colors.white : Colors.black).withOpacity(0.05),
+                fillColor: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               ),
               items: (() {
@@ -1736,7 +1779,13 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
                   final uid = widget.group.memberUids[i];
                   final name = widget.group.memberNames[i];
                   if (seen.add(uid)) {
-                    list.add(DropdownMenuItem(value: uid, child: Text(name)));
+                    list.add(DropdownMenuItem(
+                      value: uid,
+                      child: Text(
+                        name,
+                        style: TextStyle(color: isDark ? Colors.white : AppColors.textPrimaryLight),
+                      ),
+                    ));
                   }
                 }
                 return list;
@@ -1762,11 +1811,18 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
                 Row(
                   children: [
                     ChoiceChip(
-                      label: const Text('Equally'),
+                      label: Text(
+                        'Equally',
+                        style: TextStyle(
+                          color: _splitType == 'Equally'
+                              ? Colors.white
+                              : (isDark ? Colors.white70 : AppColors.textPrimaryLight),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       selected: _splitType == 'Equally',
                       selectedColor: AppColors.primaryPurple,
-                      backgroundColor: Colors.white.withOpacity(0.05),
-                      labelStyle: const TextStyle(color: Colors.white),
+                      backgroundColor: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
                       onSelected: (val) {
                         if (val) {
                           setState(() {
@@ -1778,11 +1834,18 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
                     ),
                     const SizedBox(width: 8),
                     ChoiceChip(
-                      label: const Text('Unequally'),
+                      label: Text(
+                        'Unequally',
+                        style: TextStyle(
+                          color: _splitType == 'Unequally'
+                              ? Colors.white
+                              : (isDark ? Colors.white70 : AppColors.textPrimaryLight),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       selected: _splitType == 'Unequally',
                       selectedColor: AppColors.primaryPurple,
-                      backgroundColor: Colors.white.withOpacity(0.05),
-                      labelStyle: const TextStyle(color: Colors.white),
+                      backgroundColor: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
                       onSelected: (val) {
                         if (val) {
                           setState(() {
