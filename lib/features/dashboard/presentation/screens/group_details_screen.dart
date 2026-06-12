@@ -1857,7 +1857,15 @@ class GroupMemberAvatar extends ConsumerWidget {
           backgroundColor: Colors.transparent,
         );
       }
-      return _buildPlaceholder();
+
+      // Fallback local asset for me
+      final sBox = Hive.box(HiveHelper.settingsBox);
+      final gender = sBox.get('user_gender', defaultValue: 'male') as String;
+      return CircleAvatar(
+        radius: radius,
+        backgroundImage: AssetImage(gender == 'female' ? 'assets/images/avatar_girl.png' : 'assets/images/avatar_boy.png'),
+        backgroundColor: Colors.transparent,
+      );
     }
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -1866,6 +1874,9 @@ class GroupMemberAvatar extends ConsumerWidget {
         if (snapshot.hasData && snapshot.data!.exists) {
           final data = snapshot.data!.data();
           final photoUrl = data?['photoUrl'] as String?;
+          final displayName = data?['displayName'] as String? ?? 'User';
+          final gender = data?['user_gender'] as String? ?? 'male';
+
           if (photoUrl != null && photoUrl.isNotEmpty) {
             ImageProvider imageProvider;
             if (photoUrl.startsWith('data:image')) {
@@ -1882,6 +1893,13 @@ class GroupMemberAvatar extends ConsumerWidget {
               backgroundColor: Colors.transparent,
             );
           }
+
+          // Fallback local asset for other members
+          return CircleAvatar(
+            radius: radius,
+            backgroundImage: AssetImage(gender == 'female' ? 'assets/images/avatar_girl.png' : 'assets/images/avatar_boy.png'),
+            backgroundColor: Colors.transparent,
+          );
         }
         return _buildPlaceholder();
       },

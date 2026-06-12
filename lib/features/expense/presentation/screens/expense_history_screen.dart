@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:espenseai/core/utils/app_page_route.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -301,14 +302,15 @@ class _ExpenseHistoryScreenState extends ConsumerState<ExpenseHistoryScreen> {
                   color: AppColors.electricBlue,
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => AddExpenseScreen(
+                    AppPageRoute(
+                      page: AddExpenseScreen(
                         editTransaction: tx,
                         preFilledAmount: tx.amount,
                         preFilledCategory: tx.category,
                         preFilledMerchant: tx.merchant,
                         preFilledNotes: tx.notes,
                       ),
+                      type: RouteTransitionType.slideUp,
                     ),
                   ),
                 ),
@@ -319,7 +321,7 @@ class _ExpenseHistoryScreenState extends ConsumerState<ExpenseHistoryScreen> {
                   color: Colors.redAccent,
                   onTap: () {
                     final isDarkLocal = Theme.of(context).brightness == Brightness.dark;
-                    showDialog(
+                    showAnimatedDialog(
                       context: context,
                       builder: (_) => AlertDialog(
                         backgroundColor: isDarkLocal ? AppColors.cardDark : Colors.white,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_provider.dart';
+import 'core/theme/theme_transition.dart';
 import 'features/auth/presentation/screens/splash_screen.dart';
 
 class ExpenseMateApp extends ConsumerWidget {
@@ -17,7 +18,11 @@ class ExpenseMateApp extends ConsumerWidget {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
+      builder: (context, child) {
+        return ThemeTransitionOverlay(child: child!);
+      },
       home: const SplashScreen(),
     );
   }
 }
+

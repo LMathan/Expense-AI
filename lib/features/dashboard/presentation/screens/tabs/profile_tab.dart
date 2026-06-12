@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:espenseai/core/utils/app_page_route.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:espenseai/core/constants/colors.dart';
 import 'package:espenseai/core/constants/text_styles.dart';
 import 'package:espenseai/core/theme/theme_provider.dart';
+import 'package:espenseai/core/theme/theme_transition.dart';
 import 'package:espenseai/core/widgets/glass_card.dart';
 import 'package:espenseai/core/widgets/gradient_progress_bar.dart';
 import 'package:espenseai/features/expense/presentation/providers/expense_provider.dart';
@@ -16,7 +18,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:hive/hive.dart';
 import 'package:espenseai/core/storage/hive_helper.dart';
 import 'package:espenseai/core/services/firestore_sync_service.dart';
+import 'package:espenseai/core/services/notification_service.dart';
 import 'package:espenseai/core/widgets/vector_illustrations.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class ProfileTab extends ConsumerStatefulWidget {
   final bool showBackButton;
@@ -26,17 +30,48 @@ class ProfileTab extends ConsumerStatefulWidget {
   ConsumerState<ProfileTab> createState() => _ProfileTabState();
 }
 
-class _ProfileTabState extends ConsumerState<ProfileTab> {
+class _ProfileTabState extends ConsumerState<ProfileTab> with WidgetsBindingObserver {
   final _goalTitleController = TextEditingController();
   final _goalTargetController = TextEditingController();
 
   bool _biometrics = false;
   String _currency = '₹';
 
+  final ValueNotifier<PermissionStatus> _notificationStatusNotifier =
+      ValueNotifier(PermissionStatus.denied);
+  final ValueNotifier<PermissionStatus> _cameraStatusNotifier =
+      ValueNotifier(PermissionStatus.denied);
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSettings();
+    _updatePermissionStatuses();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationStatusNotifier.dispose();
+    _cameraStatusNotifier.dispose();
+    super.dispose();
+  }
+
+  Future<void> _updatePermissionStatuses() async {
+    _notificationStatusNotifier.value = await Permission.notification.status;
+    _cameraStatusNotifier.value = await Permission.camera.status;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _updatePermissionStatuses().then((_) {
+        if (_notificationStatusNotifier.value.isGranted) {
+          ref.read(notificationServiceProvider).scheduleReminders();
+        }
+      });
+    }
   }
 
   void _pickProfilePicture({ImageSource source = ImageSource.gallery}) async {
@@ -72,7 +107,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
 
   void _showAboutAppDialog() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    showDialog(
+    showAnimatedDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: isDark ? AppColors.cardDark : Colors.white,
@@ -148,7 +183,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
               const Divider(height: 1),
               const SizedBox(height: 12),
               Text(
-                'App Version: 1.0.6',
+                'App Version: 1.0.7',
                 style: TextStyle(
                   fontSize: 11,
                   color: isDark ? Colors.white38 : Colors.black38,
@@ -174,6 +209,344 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
             ),
           ),
         ],
+      ),
+    );
+  }
+  void _showPermissionsDialog() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Query initial statuses
+    await _updatePermissionStatuses();
+
+    if (!mounted) return;
+
+    showAnimatedDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxWidth: 400),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A) : Colors.white,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : AppColors.borderLight,
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.08),
+                  blurRadius: 32,
+                  spreadRadius: 4,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header section with gradient and shield badge
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: isDark
+                              ? [
+                                  const Color(0xFF1E1B4B).withValues(alpha: 0.4),
+                                  const Color(0xFF0F172A),
+                                ]
+                              : [
+                                  AppColors.primaryPurple.withValues(alpha: 0.04),
+                                  Colors.white,
+                                ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryPurple.withValues(alpha: 0.12),
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.primaryPurple.withValues(alpha: 0.2),
+                                  blurRadius: 16,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.security_rounded,
+                              color: AppColors.primaryPurple,
+                              size: 32,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'App Permissions',
+                            style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 22,
+                              color: isDark ? Colors.white : Colors.black87,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Manage device permissions for premium features',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Permission Items list
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      child: Column(
+                        children: [
+                          ValueListenableBuilder<PermissionStatus>(
+                            valueListenable: _notificationStatusNotifier,
+                            builder: (context, status, child) {
+                              return _buildPermissionTile(
+                                icon: Icons.notifications_active_rounded,
+                                title: 'Notifications',
+                                desc: 'Receive real-time budget warnings, transaction split logs, and daily logging reminders.',
+                                status: status,
+                                onTap: () async {
+                                  if (status.isDenied) {
+                                    final granted = await ref.read(notificationServiceProvider).requestPermissions();
+                                    await _updatePermissionStatuses();
+                                    if (granted) {
+                                      await ref.read(notificationServiceProvider).scheduleReminders();
+                                    }
+                                  } else {
+                                    await openAppSettings();
+                                  }
+                                },
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          ValueListenableBuilder<PermissionStatus>(
+                            valueListenable: _cameraStatusNotifier,
+                            builder: (context, status, child) {
+                              return _buildPermissionTile(
+                                icon: Icons.camera_alt_rounded,
+                                title: 'Camera',
+                                desc: 'Unlock receipt scanning using custom OCR to extract and parse merchant and pricing data instantly.',
+                                status: status,
+                                onTap: () async {
+                                  if (status.isDenied) {
+                                    await Permission.camera.request();
+                                    await _updatePermissionStatuses();
+                                  } else {
+                                    await openAppSettings();
+                                  }
+                                },
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Done action button
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
+                      child: Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          gradient: AppColors.primaryGradient,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primaryPurple.withValues(alpha: 0.35),
+                              blurRadius: 16,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => Navigator.pop(ctx),
+                            borderRadius: BorderRadius.circular(16),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              child: Center(
+                                child: Text(
+                                  'Done',
+                                  style: GoogleFonts.outfit(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPermissionTile({
+    required IconData icon,
+    required String title,
+    required String desc,
+    required PermissionStatus status,
+    required VoidCallback onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isOn = status.isGranted;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark
+            ? const Color(0xFF1E293B).withValues(alpha: 0.4)
+            : Colors.grey[50],
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? (isOn
+                  ? AppColors.emeraldGreen.withValues(alpha: 0.15)
+                  : Colors.white.withValues(alpha: 0.05))
+              : (isOn
+                  ? AppColors.emeraldGreen.withValues(alpha: 0.2)
+                  : Colors.grey[200]!),
+          width: 1.2,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: (isOn ? AppColors.emeraldGreen : AppColors.primaryPurple).withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    icon,
+                    color: isOn ? AppColors.emeraldGreen : AppColors.primaryPurple,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            title,
+                            style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              gradient: isOn
+                                  ? AppColors.greenGradient
+                                  : LinearGradient(
+                                      colors: [Colors.grey[600]!, Colors.grey[500]!],
+                                    ),
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: [
+                                if (isOn)
+                                  BoxShadow(
+                                    color: AppColors.emeraldGreen.withValues(alpha: 0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                              ],
+                            ),
+                            child: Text(
+                              isOn ? 'ACTIVE' : 'INACTIVE',
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        desc,
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Text(
+                            isOn ? 'Tap to disable in settings' : 'Tap to enable permissions',
+                            style: GoogleFonts.outfit(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: isOn ? AppColors.emeraldGreen : AppColors.primaryPurple,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            size: 8,
+                            color: isOn ? AppColors.emeraldGreen : AppColors.primaryPurple,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -241,20 +614,17 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
               ),
             ),
             const SizedBox(height: 20),
-            Hero(
-              tag: 'profile_avatar',
-              child: Container(
-                padding: const EdgeInsets.all(3),
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: AppColors.primaryGradient,
-                ),
-                child: CircleAvatar(
-                  radius: 52,
-                  backgroundImage: imageProvider,
-                  backgroundColor:
-                      isDark ? AppColors.cardDark : Colors.grey[200],
-                ),
+            Container(
+              padding: const EdgeInsets.all(3),
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: AppColors.primaryGradient,
+              ),
+              child: CircleAvatar(
+                radius: 52,
+                backgroundImage: imageProvider,
+                backgroundColor:
+                    isDark ? AppColors.cardDark : Colors.grey[200],
               ),
             ),
             const SizedBox(height: 24),
@@ -381,7 +751,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
   }
 
   void _addNewGoal() {
-    showDialog(
+    showAnimatedDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Add Savings Goal'),
@@ -439,7 +809,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
   }
 
   void _runSavingsCalculator() {
-    showDialog(
+    showAnimatedDialog(
       context: context,
       builder: (context) {
         double monthlySavings = 5000;
@@ -511,6 +881,8 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
   void _showEditUsernameDialog(String currentName) {
     final controller = TextEditingController(text: currentName);
     final syncService = FirestoreSyncService();
+    final sBox = Hive.box(HiveHelper.settingsBox);
+    String selectedGender = sBox.get('user_gender', defaultValue: 'male') as String;
     
     bool isChecking = false;
     bool isTaken = false;
@@ -518,7 +890,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     List<String> suggestions = [];
     Timer? debounce;
 
-    showDialog(
+    showAnimatedDialog(
       context: context,
       builder: (context) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -545,20 +917,23 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                   setDialogState(() {
                     isChecking = true;
                   });
-                  syncService.isUsernameTaken(clean).then((taken) {
-                    setDialogState(() {
-                      isTaken = taken;
-                      isChecking = false;
-                      if (taken) {
-                        final cleanBase = clean.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '').toLowerCase();
-                        final random = DateTime.now().millisecond;
-                        suggestions = [
-                          '${cleanBase}_${100 + (random % 900)}',
-                          '${cleanBase}${10 + (random % 90)}',
-                          '${cleanBase}_${1000 + (random % 9000)}',
-                        ];
-                      }
-                    });
+                  final queryName = clean;
+                  syncService.isUsernameTaken(queryName).then((taken) {
+                    if (controller.text.trim() == queryName) {
+                      setDialogState(() {
+                        isTaken = taken;
+                        isChecking = false;
+                        if (taken) {
+                          final cleanBase = queryName.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '').toLowerCase();
+                          final random = DateTime.now().millisecond;
+                          suggestions = [
+                            '${cleanBase}_${100 + (random % 900)}',
+                            '${cleanBase}${10 + (random % 90)}',
+                            '${cleanBase}_${1000 + (random % 9000)}',
+                          ];
+                        }
+                      });
+                    }
                   });
                 });
               }
@@ -569,9 +944,10 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
             return AlertDialog(
               backgroundColor: bgColor,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: Text('Edit Username', style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+              title: Text('Edit Username & Gender', style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   TextField(
                     controller: controller,
@@ -631,6 +1007,91 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                       }).toList(),
                     ),
                   ],
+                  const SizedBox(height: 20),
+                  Text(
+                    'Gender',
+                    style: TextStyle(color: textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setDialogState(() => selectedGender = 'male'),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              color: selectedGender == 'male'
+                                  ? AppColors.primaryPurple.withValues(alpha: isDark ? 0.2 : 0.12)
+                                  : cardColor,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: selectedGender == 'male' ? AppColors.primaryPurple : Colors.transparent,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.male_rounded,
+                                  color: selectedGender == 'male' ? AppColors.primaryPurple : textColor.withValues(alpha: 0.6),
+                                  size: 20,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Male',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: selectedGender == 'male' ? FontWeight.bold : FontWeight.normal,
+                                    color: selectedGender == 'male' ? AppColors.primaryPurple : textColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setDialogState(() => selectedGender = 'female'),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              color: selectedGender == 'female'
+                                  ? AppColors.primaryPurple.withValues(alpha: isDark ? 0.2 : 0.12)
+                                  : cardColor,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: selectedGender == 'female' ? AppColors.primaryPurple : Colors.transparent,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.female_rounded,
+                                  color: selectedGender == 'female' ? AppColors.primaryPurple : textColor.withValues(alpha: 0.6),
+                                  size: 20,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Female',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: selectedGender == 'female' ? FontWeight.bold : FontWeight.normal,
+                                    color: selectedGender == 'female' ? AppColors.primaryPurple : textColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
               actions: [
@@ -647,23 +1108,28 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                           final newName = controller.text.trim();
                           if (newName.isNotEmpty) {
                             debounce?.cancel();
+                            final messenger = ScaffoldMessenger.of(context);
+                            final navigator = Navigator.of(context);
+
                             final sBox = Hive.box(HiveHelper.settingsBox);
                             await sBox.put('user_name', newName);
+                            await sBox.put('user_gender', selectedGender);
                             
                             ref.read(authProvider.notifier).updateProfileDetails(displayName: newName);
 
-                            await syncService.updateProfileName(newName);
-                            
-                            if (mounted) {
-                              setState(() {});
-                              Navigator.pop(context);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Username updated successfully!'),
-                                  backgroundColor: AppColors.emeraldGreen,
-                                ),
-                              );
-                            }
+                            navigator.pop();
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('Profile updated successfully!'),
+                                backgroundColor: AppColors.emeraldGreen,
+                              ),
+                            );
+
+                            syncService.updateProfileName(newName).then((_) {
+                              if (mounted) {
+                                setState(() {});
+                              }
+                            });
                           }
                         }
                       : null,
@@ -687,7 +1153,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     if (mounted) {
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        AppPageRoute(page: const LoginScreen(), type: RouteTransitionType.fade),
         (route) => false,
       );
     }
@@ -723,7 +1189,8 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
     } else if (profilePicUrl != null) {
       imageProvider = NetworkImage(profilePicUrl);
     } else {
-      imageProvider = const NetworkImage('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150');
+      final String gender = sBox.get('user_gender', defaultValue: 'male') as String;
+      imageProvider = AssetImage(gender == 'female' ? 'assets/images/avatar_girl.png' : 'assets/images/avatar_boy.png');
     }
 
     return Scaffold(
@@ -784,20 +1251,23 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                           context, imageProvider, profilePicPath ?? profilePicUrl),
                       child: Stack(
                         children: [
-                          Hero(
-                            tag: 'profile_avatar',
-                            child: Container(
-                              padding: const EdgeInsets.all(3),
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: AppColors.primaryGradient,
-                              ),
-                              child: CircleAvatar(
-                                radius: 36,
-                                backgroundImage: imageProvider,
-                                backgroundColor: isDark
-                                    ? AppColors.cardDark
-                                    : Colors.grey[200],
+                          HeroMode(
+                            enabled: widget.showBackButton,
+                            child: Hero(
+                              tag: 'profile_avatar',
+                              child: Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: AppColors.primaryGradient,
+                                ),
+                                child: CircleAvatar(
+                                  radius: 36,
+                                  backgroundImage: imageProvider,
+                                  backgroundColor: isDark
+                                      ? AppColors.cardDark
+                                      : Colors.grey[200],
+                                ),
                               ),
                             ),
                           ),
@@ -824,7 +1294,14 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(name, style: AppTextStyles.heading3(isDark: isDark)),
+                        Text(
+                          name,
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                          ),
+                        ),
                         const SizedBox(width: 8),
                         IconButton(
                           icon: Icon(Icons.edit_rounded, color: isDark ? AppColors.electricBlue : AppColors.primaryPurple, size: 18),
@@ -1069,10 +1546,14 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                         'Dark Theme Mode',
                         style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                       ),
-                      trailing: Switch(
-                        value: isDark,
-                        onChanged: (_) =>
-                            ref.read(themeProvider.notifier).toggleTheme(),
+                      trailing: Builder(
+                        builder: (switchContext) {
+                          return Switch(
+                            value: isDark,
+                            onChanged: (_) =>
+                                ThemeTransition.toggle(switchContext, ref),
+                          );
+                        },
                       ),
                     ),
                     const Divider(color: AppColors.borderDark, height: 1),
@@ -1119,6 +1600,55 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
                           if (val != null) _updateCurrency(val);
                         },
                       ),
+                    ),
+                    const Divider(color: AppColors.borderDark, height: 1),
+                    ListTile(
+                      leading: Icon(
+                        Icons.wc_rounded,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      title: Text(
+                        'Gender Settings',
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                      ),
+                      trailing: DropdownButton<String>(
+                        value: sBox.get('user_gender', defaultValue: 'male') as String,
+                        dropdownColor: isDark ? AppColors.cardDark : Colors.white,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'male', child: Text('Male')),
+                          DropdownMenuItem(value: 'female', child: Text('Female')),
+                        ],
+                        onChanged: (val) async {
+                          if (val != null) {
+                            await sBox.put('user_gender', val);
+                            ref.read(authProvider.notifier).updateProfileDetails(
+                              displayName: name,
+                            );
+                            await FirestoreSyncService().updateProfileName(name, gender: val);
+                            setState(() {});
+                          }
+                        },
+                      ),
+                    ),
+                    const Divider(color: AppColors.borderDark, height: 1),
+                    ListTile(
+                      leading: Icon(
+                        Icons.security_rounded,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      title: Text(
+                        'App Permissions',
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: isDark ? Colors.white54 : Colors.black45,
+                      ),
+                      onTap: _showPermissionsDialog,
                     ),
                     const Divider(color: AppColors.borderDark, height: 1),
                     ListTile(
@@ -1195,7 +1725,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Version 1.0.6',
+                'Version 1.0.7',
                 style: TextStyle(
                   fontSize: 11,
                   color: isDark ? Colors.white38 : Colors.black38,

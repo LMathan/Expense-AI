@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:espenseai/core/utils/app_page_route.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:espenseai/core/constants/colors.dart';
@@ -86,7 +87,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
   void _onForgotPassword() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    showDialog(
+    showAnimatedDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: isDark ? AppColors.cardDark : Colors.white,
@@ -415,7 +416,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           GestureDetector(
                             onTap: () => Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const SignupScreen()),
+                              AppPageRoute(page: const SignupScreen(), type: RouteTransitionType.slideRight),
                             ),
                             child: Text(
                               'Sign Up',

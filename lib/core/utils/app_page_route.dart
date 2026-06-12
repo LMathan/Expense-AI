@@ -47,3 +47,34 @@ class AppPageRoute<T> extends PageRouteBuilder<T> {
           },
         );
 }
+
+Future<T?> showAnimatedDialog<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+}) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return showGeneralDialog<T>(
+    context: context,
+    barrierDismissible: barrierDismissible,
+    barrierLabel: 'Dismiss Dialog',
+    barrierColor: isDark 
+        ? Colors.black.withOpacity(0.72) 
+        : Colors.black.withOpacity(0.48),
+    transitionDuration: const Duration(milliseconds: 320),
+    pageBuilder: (context, animation, secondaryAnimation) => builder(context),
+    transitionBuilder: (context, animation, secondaryAnimation, child) {
+      final curve = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutBack,
+      );
+      return ScaleTransition(
+        scale: Tween<double>(begin: 0.84, end: 1.0).animate(curve),
+        child: FadeTransition(
+          opacity: animation,
+          child: child,
+        ),
+      );
+    },
+  );
+}

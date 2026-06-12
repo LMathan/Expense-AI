@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:espenseai/core/utils/app_page_route.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:espenseai/core/constants/colors.dart';
@@ -41,7 +42,7 @@ class _PlannerTabState extends ConsumerState<PlannerTab>
     String cycle = 'Monthly';
     DateTime dueDate = DateTime.now();
 
-    showDialog(
+    showAnimatedDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
@@ -180,7 +181,7 @@ class _PlannerTabState extends ConsumerState<PlannerTab>
     String recurrence = 'One-time';
     DateTime dueDate = DateTime.now();
 
-    showDialog(
+    showAnimatedDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
@@ -700,7 +701,7 @@ class _PlannerTabState extends ConsumerState<PlannerTab>
               return GestureDetector(
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => DayDetailsScreen(date: cellDate)),
+                  AppPageRoute(page: DayDetailsScreen(date: cellDate), type: RouteTransitionType.slideRight),
                 ),
                 child: Container(
                   alignment: Alignment.center,

@@ -10,6 +10,8 @@ import 'dart:io';
 import 'package:espenseai/features/expense/presentation/providers/expense_provider.dart';
 import 'package:espenseai/core/utils/category_emoji_helper.dart';
 import 'package:espenseai/core/widgets/vector_illustrations.dart';
+import 'package:hive/hive.dart';
+import 'package:espenseai/core/storage/hive_helper.dart';
 
 class AnalyticsTab extends ConsumerStatefulWidget {
   const AnalyticsTab({super.key});
@@ -54,6 +56,42 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
   @override
   Widget build(BuildContext context) {
     final txs = ref.watch(transactionProvider);
+    final budget = ref.watch(budgetProvider);
+    final settingsBox = Hive.box(HiveHelper.settingsBox);
+    final resetDay = settingsBox.get('budget_reset_day', defaultValue: 1) as int;
+
+    DateTime getCycleStartDate(int day) {
+      final now = DateTime.now();
+      int year = now.year;
+      int month = now.month;
+      int daysInMonth = DateTime(year, month + 1, 0).day;
+      int targetDay = day > daysInMonth ? daysInMonth : day;
+      if (now.day >= targetDay) {
+        return DateTime(year, month, targetDay);
+      } else {
+        int prevMonth = month - 1;
+        int prevYear = year;
+        if (prevMonth == 0) {
+          prevMonth = 12;
+          prevYear = year - 1;
+        }
+        int daysInPrevMonth = DateTime(prevYear, prevMonth + 1, 0).day;
+        int prevTargetDay = day > daysInPrevMonth ? daysInPrevMonth : day;
+        return DateTime(prevYear, prevMonth, prevTargetDay);
+      }
+    }
+
+    final cycleStart = getCycleStartDate(resetDay);
+    double currentMonthSpent = 0;
+    for (var tx in txs) {
+      if (tx.date.compareTo(cycleStart) >= 0) {
+        currentMonthSpent += tx.amount;
+      }
+    }
+
+    final currentMonthIncome = budget.monthlyIncome;
+    final currentMonthSavings = currentMonthIncome - currentMonthSpent;
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : AppColors.textPrimaryLight;
     final subColor = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
@@ -180,6 +218,127 @@ class _AnalyticsTabState extends ConsumerState<AnalyticsTab> {
                       ),
                       const SizedBox(height: 12),
                     ],
+
+                    GlassCard(
+                      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.arrow_downward_rounded,
+                                      size: 12,
+                                      color: AppColors.emeraldGreen.withValues(alpha: 0.8),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Income',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: subColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '₹${currentMonthIncome.toStringAsFixed(0)}',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.emeraldGreen,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            height: 32,
+                            width: 1,
+                            color: dividerColor,
+                          ),
+                          Expanded(
+                            child: Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.arrow_upward_rounded,
+                                      size: 12,
+                                      color: AppColors.primaryPurple.withValues(alpha: 0.8),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Spent',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: subColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '₹${currentMonthSpent.toStringAsFixed(0)}',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.primaryPurple,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            height: 32,
+                            width: 1,
+                            color: dividerColor,
+                          ),
+                          Expanded(
+                            child: Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.savings_rounded,
+                                      size: 12,
+                                      color: AppColors.electricBlue.withValues(alpha: 0.8),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Savings',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: subColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '₹${currentMonthSavings.toStringAsFixed(0)}',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.electricBlue,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
 
                     GlassCard(
                       child: InteractiveChart(

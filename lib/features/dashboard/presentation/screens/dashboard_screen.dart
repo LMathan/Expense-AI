@@ -18,7 +18,9 @@ import 'tabs/home_tab.dart';
 import 'tabs/analytics_tab.dart';
 import 'tabs/planner_tab.dart';
 import 'tabs/profile_tab.dart';
+import 'create_group_screen.dart';
 import 'package:espenseai/features/auth/presentation/providers/auth_provider.dart';
+import 'package:espenseai/features/dashboard/presentation/providers/dashboard_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -29,8 +31,7 @@ class DashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen>
-    with SingleTickerProviderStateMixin {
-  int _currentIndex = 0;
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final BiometricService _bioService = BiometricService();
   bool _isLocked = false;
   late AnimationController _addBtnCtrl;
@@ -49,6 +50,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _addBtnCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 160),
@@ -66,11 +68,27 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _addBtnCtrl.dispose();
     _groupsSubscription?.cancel();
     _transactionsSubscription?.cancel();
     _profileSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkNotificationStatusOnResume();
+    }
+  }
+
+  void _checkNotificationStatusOnResume() async {
+    final status = await Permission.notification.status;
+    if (status.isGranted) {
+      final notificationService = ref.read(notificationServiceProvider);
+      await notificationService.scheduleReminders();
+    }
   }
 
   void _setupNotifications() async {
@@ -90,7 +108,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   void _showNotificationPermissionRationaleDialog(PermissionStatus currentStatus) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isPermanentlyDenied = currentStatus.isPermanentlyDenied;
-    showDialog(
+    showAnimatedDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
@@ -161,8 +179,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                     if (isPermanentlyDenied) {
                       await openAppSettings();
                     } else {
-                      final result = await Permission.notification.request();
-                      if (result.isGranted) {
+                      final isGranted = await ref.read(notificationServiceProvider).requestPermissions();
+                      if (isGranted) {
                         await ref.read(notificationServiceProvider).scheduleReminders();
                       }
                     }
@@ -244,7 +262,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   }
 
   void _showOnboardingProfileSetup() {
-    showDialog(
+    showAnimatedDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) {
@@ -256,7 +274,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   }
 
   void _showWalkthroughDialog() {
-    showDialog(
+    showAnimatedDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) {
@@ -499,9 +517,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       );
     }
 
+    final currentIndex = ref.watch(dashboardIndexProvider);
+
     return Scaffold(
       backgroundColor: isDark ? AppColors.bgDark : AppColors.bgLight,
-      appBar: _currentIndex == 0
+      appBar: currentIndex == 0
           ? null
           : AppBar(
               automaticallyImplyLeading: false,
@@ -528,29 +548,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             ),
       body: Stack(
         children: [
-          // Tab body with animated switcher
+          // Tab body with IndexedStack to keep tabs alive and eliminate lag
           Positioned.fill(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 90.0),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 280),
-                transitionBuilder: (child, animation) {
-                  return FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, 0.04),
-                        end: Offset.zero,
-                      ).animate(CurvedAnimation(
-                          parent: animation, curve: Curves.easeOutCubic)),
-                      child: child,
-                    ),
-                  );
-                },
-                child: KeyedSubtree(
-                  key: ValueKey(_currentIndex),
-                  child: _tabs[_currentIndex],
-                ),
+              child: AnimatedIndexedStack(
+                index: currentIndex,
+                children: _tabs,
               ),
             ),
           ),
@@ -588,11 +592,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _buildNavItem(0, Icons.home_rounded, Icons.home_outlined, 'Home'),
-                      _buildNavItem(1, Icons.analytics_rounded, Icons.analytics_outlined, 'Charts'),
+                      _buildNavItem(0, Icons.home_rounded, Icons.home_outlined, 'Home', currentIndex),
+                      _buildCreateGroupButton(isDark),
                       _buildAddButton(),
-                      _buildNavItem(2, Icons.calendar_month_rounded, Icons.calendar_month_outlined, 'Planner'),
-                      _buildNavItem(3, Icons.person_rounded, Icons.person_outline_rounded, 'Profile'),
+                      _buildNavItem(2, Icons.calendar_month_rounded, Icons.calendar_month_outlined, 'Planner', currentIndex),
+                      _buildNavItem(3, Icons.person_rounded, Icons.person_outline_rounded, 'Profile', currentIndex),
                     ],
                   ),
                 ),
@@ -604,13 +608,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
-  Widget _buildNavItem(int index, IconData filledIcon, IconData outlineIcon, String label) {
-    final isSelected = _currentIndex == index;
+  Widget _buildNavItem(int index, IconData filledIcon, IconData outlineIcon, String label, int currentIndex) {
+    final isSelected = currentIndex == index;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final unselectedColor = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
     return GestureDetector(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () => ref.read(dashboardIndexProvider.notifier).state = index,
       behavior: HitTestBehavior.opaque,
       child: SizedBox(
         width: 64,
@@ -626,10 +630,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Icon(
-                isSelected ? filledIcon : outlineIcon,
-                color: isSelected ? AppColors.primaryPurple : unselectedColor,
-                size: 24,
+              child: AnimatedScale(
+                scale: isSelected ? 1.15 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutBack,
+                child: Icon(
+                  isSelected ? filledIcon : outlineIcon,
+                  color: isSelected ? AppColors.primaryPurple : unselectedColor,
+                  size: 24,
+                ),
               ),
             ),
             const SizedBox(height: 3),
@@ -679,6 +688,60 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ),
     );
   }
+
+  Widget _buildCreateGroupButton(bool isDark) {
+    final unselectedColor = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          AppPageRoute(
+            page: const CreateGroupScreen(),
+            type: RouteTransitionType.slideUp,
+          ),
+        );
+      },
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 64,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: const BoxDecoration(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.all(Radius.circular(14)),
+              ),
+              child: AnimatedScale(
+                scale: 1.0,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutBack,
+                child: Icon(
+                  Icons.group_add_outlined,
+                  color: unselectedColor,
+                  size: 24,
+                ),
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              'New Group',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: unselectedColor,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class OnboardingProfileSetupDialog extends ConsumerStatefulWidget {
@@ -697,6 +760,7 @@ class _OnboardingProfileSetupDialogState extends ConsumerState<OnboardingProfile
   bool _isValidFormat = true;
   List<String> _suggestions = [];
   Timer? _debounce;
+  String _selectedGender = 'male';
 
   @override
   void dispose() {
@@ -765,6 +829,7 @@ class _OnboardingProfileSetupDialogState extends ConsumerState<OnboardingProfile
 
     final box = Hive.box(HiveHelper.settingsBox);
     await box.put('user_name', username);
+    await box.put('user_gender', _selectedGender);
     await box.put('has_completed_profile_setup', true);
 
     final imagePath = _imagePath;
@@ -803,9 +868,14 @@ class _OnboardingProfileSetupDialogState extends ConsumerState<OnboardingProfile
     final textColor = isDark ? Colors.white : Colors.black87;
     final textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
+    final username = _controller.text.trim();
+    final nameSeed = username.isNotEmpty ? username : 'ExpenseMate';
+    final String seed = _selectedGender == 'female' 
+        ? 'Willow_${nameSeed.replaceAll(' ', '')}' 
+        : 'Oliver_${nameSeed.replaceAll(' ', '')}';
     final imageProvider = (_imagePath != null && File(_imagePath!).existsSync())
         ? FileImage(File(_imagePath!)) as ImageProvider
-        : const NetworkImage('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150');
+        : AssetImage(_selectedGender == 'female' ? 'assets/images/avatar_girl.png' : 'assets/images/avatar_boy.png') as ImageProvider;
 
     final canSave = _controller.text.trim().isNotEmpty && _isValidFormat && !_isTaken && !_isChecking;
 
@@ -898,7 +968,88 @@ class _OnboardingProfileSetupDialogState extends ConsumerState<OnboardingProfile
                 ),
                 onChanged: _onUsernameChanged,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _selectedGender = 'male'),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: _selectedGender == 'male'
+                              ? AppColors.primaryPurple.withValues(alpha: isDark ? 0.2 : 0.12)
+                              : cardColor,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: _selectedGender == 'male' ? AppColors.primaryPurple : Colors.transparent,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.male_rounded,
+                              color: _selectedGender == 'male' ? AppColors.primaryPurple : textColor.withValues(alpha: 0.6),
+                              size: 24,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Male',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: _selectedGender == 'male' ? FontWeight.bold : FontWeight.normal,
+                                color: _selectedGender == 'male' ? AppColors.primaryPurple : textColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _selectedGender = 'female'),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: _selectedGender == 'female'
+                              ? AppColors.primaryPurple.withValues(alpha: isDark ? 0.2 : 0.12)
+                              : cardColor,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: _selectedGender == 'female' ? AppColors.primaryPurple : Colors.transparent,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.female_rounded,
+                              color: _selectedGender == 'female' ? AppColors.primaryPurple : textColor.withValues(alpha: 0.6),
+                              size: 24,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Female',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: _selectedGender == 'female' ? FontWeight.bold : FontWeight.normal,
+                                color: _selectedGender == 'female' ? AppColors.primaryPurple : textColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
 
               if (!_isValidFormat && _controller.text.trim().isNotEmpty)
                 Padding(
@@ -968,6 +1119,76 @@ class _OnboardingProfileSetupDialogState extends ConsumerState<OnboardingProfile
           ),
         ),
       ),
+    );
+  }
+}
+
+class AnimatedIndexedStack extends StatefulWidget {
+  final int index;
+  final List<Widget> children;
+
+  const AnimatedIndexedStack({
+    super.key,
+    required this.index,
+    required this.children,
+  });
+
+  @override
+  State<AnimatedIndexedStack> createState() => _AnimatedIndexedStackState();
+}
+
+class _AnimatedIndexedStackState extends State<AnimatedIndexedStack>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+    );
+    _animation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOutCubic,
+    );
+    _controller.forward();
+  }
+
+  @override
+  void didUpdateWidget(covariant AnimatedIndexedStack oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.index != widget.index) {
+      _controller.forward(from: 0.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IndexedStack(
+      index: widget.index,
+      children: List.generate(widget.children.length, (i) {
+        final isCurrent = i == widget.index;
+        return FadeTransition(
+          opacity: isCurrent ? _animation : const AlwaysStoppedAnimation(0.0),
+          child: SlideTransition(
+            position: isCurrent
+                ? Tween<Offset>(
+                    begin: const Offset(0.0, 0.025),
+                    end: Offset.zero,
+                  ).animate(_animation)
+                : const AlwaysStoppedAnimation(Offset.zero),
+            child: widget.children[i],
+          ),
+        );
+      }),
     );
   }
 }

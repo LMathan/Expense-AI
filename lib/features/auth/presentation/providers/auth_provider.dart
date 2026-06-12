@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../../../core/storage/hive_helper.dart';
 import '../../../../core/services/firestore_sync_service.dart';
 
@@ -68,6 +71,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final profilePicPath = box.get('profile_picture_path') as String?;
       final profilePicUrl = box.get('profile_picture_url') as String?;
 
+      String? actualProfilePicPath = profilePicPath;
+      if (profilePicPath != null && !profilePicPath.startsWith('http')) {
+        final file = File(profilePicPath);
+        if (!file.existsSync()) {
+          actualProfilePicPath = null;
+          // Recreate persistent cache file in application documents directory if we have base64 url
+          if (profilePicUrl != null && profilePicUrl.startsWith('data:image')) {
+            _recreateProfilePicCache(profilePicUrl);
+          }
+        }
+      }
+
       final firebaseUser = _firebaseAuth.currentUser;
 
       if (isLoggedIn && firebaseUser != null) {
@@ -75,7 +90,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
           status: AuthStatus.authenticated,
           email: firebaseUser.email,
           displayName: firebaseUser.displayName ?? userName,
-          profilePicPath: profilePicPath,
+          profilePicPath: actualProfilePicPath,
           profilePicUrl: profilePicUrl,
         );
         // Sync cloud database to local Hive in the background
@@ -84,7 +99,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         state = AuthState(
           status: AuthStatus.guest,
           displayName: userName,
-          profilePicPath: profilePicPath,
+          profilePicPath: actualProfilePicPath,
           profilePicUrl: profilePicUrl,
         );
       } else {
@@ -92,6 +107,25 @@ class AuthNotifier extends StateNotifier<AuthState> {
       }
     } catch (_) {
       state = AuthState(status: AuthStatus.unauthenticated);
+    }
+  }
+
+  void _recreateProfilePicCache(String base64Url) async {
+    try {
+      final base64String = base64Url.split('base64,').last;
+      final bytes = base64Decode(base64String);
+      final docDir = await getApplicationDocumentsDirectory();
+      final cachedFile = File('${docDir.path}/profile_persistent.jpg');
+      await cachedFile.writeAsBytes(bytes);
+      
+      final box = Hive.box(HiveHelper.settingsBox);
+      await box.put('profile_picture_path', cachedFile.path);
+      
+      // Update state with the newly created path reactively
+      state = state.copyWith(profilePicPath: cachedFile.path);
+      debugPrint('Recreated profile picture cache successfully.');
+    } catch (e) {
+      debugPrint('Error recreating profile picture cache: $e');
     }
   }
 

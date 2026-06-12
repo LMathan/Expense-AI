@@ -15,6 +15,7 @@ import '../models/subscription_model.dart';
 import '../models/bill_reminder_model.dart';
 import '../models/challenge_model.dart';
 import '../models/group_model.dart';
+import 'notification_service.dart';
 
 class FirestoreSyncService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -24,6 +25,30 @@ class FirestoreSyncService {
 
   // Check if user is authenticated with Firebase
   bool get isAuthenticated => _uid != null;
+
+  double _calculateUserShare(Map<String, dynamic> data, String? currentUserEmail) {
+    final groupId = data['groupId'] as String?;
+    final splitWith = List<String>.from(data['splitWith'] ?? []);
+    final totalAmount = (data['totalAmount'] as num?)?.toDouble() ?? 0.0;
+    
+    if (groupId != null && groupId.isNotEmpty && currentUserEmail != null) {
+      double userShare = 0.0;
+      final totalSplitCount = splitWith.length + 1;
+      final splitShares = data['splitShares'] != null
+          ? Map<String, dynamic>.from(data['splitShares'])
+          : null;
+
+      if (splitShares != null && splitShares.containsKey(currentUserEmail)) {
+        userShare = (splitShares[currentUserEmail] as num).toDouble();
+      } else if (totalAmount > 0) {
+        userShare = totalAmount / totalSplitCount;
+      } else {
+        userShare = (data['amount'] as num?)?.toDouble() ?? 0.0;
+      }
+      return userShare;
+    }
+    return (data['amount'] as num?)?.toDouble() ?? 0.0;
+  }
 
   // Single upload helper
   Future<void> _uploadDocument(String collectionName, String docId, Map<String, dynamic> data) async {
@@ -69,12 +94,27 @@ class FirestoreSyncService {
           final group = GroupModel.fromMap(Map<dynamic, dynamic>.from(groupData));
           for (final memberUid in group.memberUids) {
             if (memberUid != _uid) {
+              // Calculate this specific member's share
+              double memberShare = 0.0;
+              final memberEmail = group.memberEmails[group.memberUids.indexOf(memberUid)];
+              
+              if (tx.splitShares != null && tx.splitShares!.containsKey(memberEmail)) {
+                memberShare = tx.splitShares![memberEmail]!;
+              } else if (tx.totalAmount > 0) {
+                memberShare = tx.totalAmount / (tx.splitWith.length + 1);
+              } else {
+                memberShare = tx.amount;
+              }
+
+              // Create a copy of the transaction with the member's specific share
+              final memberTx = tx.copyWith(amount: memberShare);
+
               await _firestore
                   .collection('users')
                   .doc(memberUid)
                   .collection('transactions')
                   .doc(tx.id)
-                  .set(tx.toMap(), SetOptions(merge: true));
+                  .set(memberTx.toMap(), SetOptions(merge: true));
             }
           }
         }
@@ -259,8 +299,8 @@ class FirestoreSyncService {
                 try {
                   final base64String = photoUrl.split('base64,').last;
                   final bytes = base64Decode(base64String);
-                  final tmpDir = await getTemporaryDirectory();
-                  final cachedFile = File('${tmpDir.path}/profile_cached.jpg');
+                  final docDir = await getApplicationDocumentsDirectory();
+                  final cachedFile = File('${docDir.path}/profile_persistent.jpg');
                   await cachedFile.writeAsBytes(bytes);
                   await settingsBox.put('profile_picture_path', cachedFile.path);
                 } catch (_) {
@@ -296,7 +336,20 @@ class FirestoreSyncService {
               await box.delete(docId);
             } else {
               if (change.doc.data() != null) {
+                final isNew = !box.containsKey(docId);
                 await box.put(docId, change.doc.data());
+
+                if (isNew && change.type == DocumentChangeType.added) {
+                  final data = change.doc.data()!;
+                  final createdBy = data['createdBy'] as String?;
+                  final groupName = data['name'] as String? ?? 'Group';
+                  if (createdBy != _uid) {
+                    NotificationService().showInstantNotification(
+                      'Added to Group! 👥',
+                      'You were added to the "$groupName" group.',
+                    );
+                  }
+                }
               }
             }
           }
@@ -320,7 +373,38 @@ class FirestoreSyncService {
               await box.delete(docId);
             } else {
               if (change.doc.data() != null) {
-                await box.put(docId, change.doc.data());
+                final isNew = !box.containsKey(docId);
+                final Map<String, dynamic> data = Map<String, dynamic>.from(change.doc.data() as Map);
+                
+                // Adjust local 'amount' field to match this user's specific split share
+                final currentUserEmail = _auth.currentUser?.email;
+                if (data['groupId'] != null && (data['groupId'] as String).isNotEmpty && currentUserEmail != null) {
+                  data['amount'] = _calculateUserShare(data, currentUserEmail);
+                }
+                
+                await box.put(docId, data);
+
+                if (isNew && change.type == DocumentChangeType.added) {
+                  final groupId = data['groupId'] as String?;
+                  final paidByEmail = data['paidByEmail'] as String?;
+
+                  if (groupId != null && groupId.isNotEmpty && paidByEmail != currentUserEmail) {
+                    final category = data['category'] as String? ?? 'Other';
+                    final userShare = (data['amount'] as num?)?.toDouble() ?? 0.0;
+
+                    final groupBox = Hive.box(HiveHelper.groupsBox);
+                    final groupData = groupBox.get(groupId);
+                    String groupName = 'Group';
+                    if (groupData != null) {
+                      groupName = Map<String, dynamic>.from(groupData)['name'] as String? ?? 'Group';
+                    }
+
+                    NotificationService().showInstantNotification(
+                      'New Split in $groupName 💸',
+                      'You need to pay ₹${userShare.toStringAsFixed(0)} in split for $category.',
+                    );
+                  }
+                }
               }
             }
           }
@@ -508,6 +592,7 @@ class FirestoreSyncService {
         'biometrics_enabled': settingsBox.get('biometrics_enabled', defaultValue: false),
         'currency': settingsBox.get('user_currency', defaultValue: '₹'),
         'has_completed_profile_setup': settingsBox.get('has_completed_profile_setup', defaultValue: false),
+        'user_gender': settingsBox.get('user_gender', defaultValue: 'male'),
       };
       // Profile picture: prefer cached Storage URL, else upload the local file now
       final profilePhotoUrl = settingsBox.get('profile_picture_url') as String?;
@@ -549,6 +634,9 @@ class FirestoreSyncService {
         if (data.containsKey('displayName')) {
           await settingsBox.put('user_name', data['displayName']);
         }
+        if (data.containsKey('user_gender')) {
+          await settingsBox.put('user_gender', data['user_gender']);
+        }
         if (data.containsKey('photoUrl') && data['photoUrl'] != null) {
           final photoUrl = data['photoUrl'] as String;
           await settingsBox.put('profile_picture_url', photoUrl);
@@ -556,22 +644,22 @@ class FirestoreSyncService {
             try {
               final base64String = photoUrl.split('base64,').last;
               final bytes = base64Decode(base64String);
-              final tmpDir = await getTemporaryDirectory();
-              final cachedFile = File('${tmpDir.path}/profile_cached.jpg');
+              final docDir = await getApplicationDocumentsDirectory();
+              final cachedFile = File('${docDir.path}/profile_persistent.jpg');
               await cachedFile.writeAsBytes(bytes);
               await settingsBox.put('profile_picture_path', cachedFile.path);
             } catch (e) {
               await settingsBox.put('profile_picture_path', photoUrl);
             }
           } else {
-            // Download image from Firebase Storage to a local cache file (legacy support)
+            // Download image from Firebase Storage to a local persistent file (legacy support)
             try {
               final bytes = await FirebaseStorage.instance
                   .ref('users/$_uid/profile.jpg')
                   .getData(5 * 1024 * 1024); // max 5 MB
               if (bytes != null) {
-                final tmpDir = await getTemporaryDirectory();
-                final cachedFile = File('${tmpDir.path}/profile_cached.jpg');
+                final docDir = await getApplicationDocumentsDirectory();
+                final cachedFile = File('${docDir.path}/profile_persistent.jpg');
                 await cachedFile.writeAsBytes(bytes);
                 await settingsBox.put('profile_picture_path', cachedFile.path);
               }
@@ -604,8 +692,13 @@ class FirestoreSyncService {
           .get();
       final txBox = Hive.box(HiveHelper.transactionsBox);
       await txBox.clear();
+      final currentUserEmail = _auth.currentUser?.email;
       for (var doc in txQuery.docs) {
-        await txBox.put(doc.id, doc.data());
+        final data = Map<String, dynamic>.from(doc.data());
+        if (data['groupId'] != null && (data['groupId'] as String).isNotEmpty && currentUserEmail != null) {
+          data['amount'] = _calculateUserShare(data, currentUserEmail);
+        }
+        await txBox.put(doc.id, data);
       }
 
       // 3. Budgets
@@ -710,6 +803,7 @@ class FirestoreSyncService {
           'email': data['email'] ?? '',
           'displayName': data['displayName'] ?? 'User',
           'photoUrl': data['photoUrl'] ?? '',
+          'user_gender': data['user_gender'] ?? 'male',
         };
       }).toList();
     } catch (e) {
@@ -741,6 +835,7 @@ class FirestoreSyncService {
           'email': data['email'] ?? '',
           'displayName': data['displayName'] ?? 'User',
           'photoUrl': data['photoUrl'] ?? '',
+          'user_gender': data['user_gender'] ?? 'male',
         };
       }).toList();
 
@@ -759,6 +854,7 @@ class FirestoreSyncService {
             'email': data['email'] ?? '',
             'displayName': data['displayName'] ?? 'User',
             'photoUrl': data['photoUrl'] ?? '',
+            'user_gender': data['user_gender'] ?? 'male',
           };
         }));
       }
@@ -778,6 +874,7 @@ class FirestoreSyncService {
             'email': data['email'] ?? '',
             'displayName': data['displayName'] ?? 'User',
             'photoUrl': data['photoUrl'] ?? '',
+            'user_gender': data['user_gender'] ?? 'male',
           };
         }));
       }
@@ -797,12 +894,15 @@ class FirestoreSyncService {
     }
   }
 
-  Future<void> updateProfileName(String newName, {String? photoUrl, bool? hasCompletedSetup}) async {
+  Future<void> updateProfileName(String newName, {String? photoUrl, bool? hasCompletedSetup, String? gender}) async {
     if (!isAuthenticated) return;
     try {
+      final sBox = Hive.box(HiveHelper.settingsBox);
+      final actualGender = gender ?? sBox.get('user_gender', defaultValue: 'male') as String;
       final Map<String, dynamic> updates = {
         'displayName': newName,
         'displayNameLowercase': newName.toLowerCase(),
+        'user_gender': actualGender,
       };
       if (photoUrl != null) {
         updates['photoUrl'] = photoUrl;
@@ -818,6 +918,7 @@ class FirestoreSyncService {
 
   Future<bool> isUsernameTaken(String username) async {
     if (username.trim().isEmpty) return false;
+    if (!isAuthenticated) return false;
     try {
       final querySnapshot = await _firestore
           .collection('users')

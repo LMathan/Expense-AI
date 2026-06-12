@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:espenseai/core/utils/app_page_route.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:espenseai/core/constants/colors.dart';
@@ -50,7 +51,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
       if (success && mounted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          AppPageRoute(page: const DashboardScreen(), type: RouteTransitionType.fade),
           (route) => false,
         );
       } else if (mounted) {

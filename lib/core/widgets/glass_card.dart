@@ -54,10 +54,17 @@ class GlassCard extends StatelessWidget {
       );
     }
 
-    // Dark mode: glassmorphism
+    // Dark mode: sleek dark card style (buttery smooth scrolling without BackdropFilter blur)
     return Container(
+      padding: padding,
       decoration: BoxDecoration(
+        color: AppColors.cardDark,
         borderRadius: BorderRadius.circular(borderRadius),
+        border: customBorder ??
+            Border.all(
+              color: Colors.white.withValues(alpha: borderOpacity),
+              width: 1.2,
+            ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.28),
@@ -65,34 +72,17 @@ class GlassCard extends StatelessWidget {
             offset: const Offset(0, 8),
           ),
         ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 14.0, sigmaY: 14.0),
-          child: Container(
-            padding: padding,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(borderRadius),
-              border: customBorder ??
-                  Border.all(
-                    color: Colors.white.withValues(alpha: borderOpacity),
-                    width: 1.2,
-                  ),
-              gradient: LinearGradient(
-                colors: gradientColors ??
-                    [
-                      Colors.white.withValues(alpha: bgOpacity),
-                      Colors.white.withValues(alpha: bgOpacity * 0.3),
-                    ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: child,
-          ),
+        gradient: LinearGradient(
+          colors: gradientColors ??
+              [
+                AppColors.cardDark.withValues(alpha: bgOpacity + 0.65),
+                AppColors.bgDark.withValues(alpha: bgOpacity + 0.75),
+              ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
       ),
+      child: child,
     );
   }
 }

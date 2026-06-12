@@ -5,9 +5,6 @@ import 'package:intl/intl.dart';
 import 'package:espenseai/core/constants/colors.dart';
 import 'package:espenseai/core/constants/text_styles.dart';
 import 'package:espenseai/core/services/notification_service.dart';
-import 'package:espenseai/core/widgets/glass_card.dart';
-import 'package:espenseai/core/widgets/gradient_progress_bar.dart';
-import 'package:espenseai/core/widgets/interactive_chart.dart';
 import 'package:espenseai/core/widgets/vector_illustrations.dart';
 // AppBackground, PageBg, StaggeredListItem exported from vector_illustrations
 import 'package:espenseai/core/services/ocr_service.dart';
@@ -27,6 +24,8 @@ import 'package:espenseai/core/utils/transaction_permissions.dart';
 import 'package:espenseai/features/auth/presentation/providers/auth_provider.dart';
 import '../group_details_screen.dart';
 import '../create_group_screen.dart';
+import '../owe_details_screen.dart';
+import '../../providers/dashboard_provider.dart';
 import 'profile_tab.dart';
 import 'package:espenseai/core/utils/category_emoji_helper.dart';
 
@@ -245,7 +244,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
     final currentDay = settingsBox.get('budget_reset_day', defaultValue: 1) as int;
     int selected = currentDay;
     
-    showDialog(
+    showAnimatedDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
@@ -346,10 +345,51 @@ class _HomeTabState extends ConsumerState<HomeTab> {
     }
   }
 
+  Widget _buildSolidCard({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(20),
+    double borderRadius = 24,
+    List<Color>? gradientColors,
+    bool hasShadow = true,
+    Color? customBg,
+    Border? customBorder,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: customBg ?? (isDark ? AppColors.cardDark : Colors.white),
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: customBorder ?? Border.all(
+          color: isDark 
+              ? Colors.white.withValues(alpha: 0.06) 
+              : AppColors.borderLight,
+          width: 1.0,
+        ),
+        boxShadow: hasShadow
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                ),
+              ]
+            : null,
+        gradient: gradientColors != null
+            ? LinearGradient(
+                colors: gradientColors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : null,
+      ),
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final txs = ref.watch(transactionProvider);
-    final budget = ref.watch(budgetProvider);
     final groups = ref.watch(groupsProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final settingsBox = Hive.box(HiveHelper.settingsBox);
@@ -389,8 +429,57 @@ class _HomeTabState extends ConsumerState<HomeTab> {
       }
     }
 
-    final remaining = budget.monthlyIncome - currentMonthSpent;
-    final progress = budget.monthlyIncome > 0 ? (currentMonthSpent / budget.monthlyIncome).clamp(0.0, 1.0) : 0.0;
+    final now = DateTime.now();
+    double todaySpent = 0;
+    for (var tx in txs) {
+      if (tx.date.year == now.year && tx.date.month == now.month && tx.date.day == now.day) {
+        todaySpent += tx.amount;
+      }
+    }
+
+    final authState = ref.watch(authProvider);
+    final currentEmail = authState.email ?? '';
+    double totalOwed = 0.0;
+
+    if (currentEmail.isNotEmpty) {
+      final myEmail = currentEmail.trim().toLowerCase();
+      for (var group in groups) {
+        final groupTxs = txs.where((tx) => tx.groupId == group.id).toList();
+        final Map<String, double> balances = {};
+        for (var tx in groupTxs) {
+          if (tx.isSettled) continue;
+          final payerEmail = tx.paidByEmail.trim().toLowerCase();
+          final splitWith = tx.splitWith.map((e) => e.trim().toLowerCase()).toList();
+          final totalSplitCount = splitWith.length;
+          if (totalSplitCount == 0) continue;
+
+          final perHeadAmount = tx.totalAmount > 0 
+              ? tx.totalAmount / totalSplitCount 
+              : tx.amount;
+
+          if (tx.splitShares != null && tx.splitShares!.isNotEmpty) {
+            double payerCredit = 0.0;
+            for (var email in splitWith) {
+              final share = tx.splitShares![email] ?? perHeadAmount;
+              balances[email] = (balances[email] ?? 0.0) - share;
+              payerCredit += share;
+            }
+            balances[payerEmail] = (balances[payerEmail] ?? 0.0) + payerCredit;
+          } else {
+            final payerCredit = perHeadAmount * splitWith.length;
+            balances[payerEmail] = (balances[payerEmail] ?? 0.0) + payerCredit;
+            for (var email in splitWith) {
+              balances[email] = (balances[email] ?? 0.0) - perHeadAmount;
+            }
+          }
+        }
+
+        final myBalance = balances[myEmail] ?? 0.0;
+        if (myBalance < -0.01) {
+          totalOwed += -myBalance;
+        }
+      }
+    }
     
     final Map<String, double> categorySpending = {};
     for (var tx in txs) {
@@ -411,7 +500,6 @@ class _HomeTabState extends ConsumerState<HomeTab> {
       greeting = 'Good Evening 🌙,';
     }
 
-    final authState = ref.watch(authProvider);
     final String? profilePicPath = authState.profilePicPath;
     final String? profilePicUrl = authState.profilePicUrl;
     final ImageProvider imageProvider;
@@ -428,7 +516,8 @@ class _HomeTabState extends ConsumerState<HomeTab> {
     } else if (profilePicUrl != null) {
       imageProvider = NetworkImage(profilePicUrl);
     } else {
-      imageProvider = const NetworkImage('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150');
+      final String gender = settingsBox.get('user_gender', defaultValue: 'male') as String;
+      imageProvider = AssetImage(gender == 'female' ? 'assets/images/avatar_girl.png' : 'assets/images/avatar_boy.png');
     }
 
     return Scaffold(
@@ -475,7 +564,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                         ),
                       ],
                     ),
-                    GestureDetector(
+                    BouncyGestureDetector(
                       onTap: () => Navigator.push(
                         context,
                         AppPageRoute(
@@ -512,94 +601,169 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                     ),
                     Text(
                       userName,
-                      style: AppTextStyles.heading2(isDark: isDark).copyWith(fontSize: 26),
+                      style: GoogleFonts.spaceGrotesk(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                      ),
                     ),
                   ],
                 ),
                 
                 const SizedBox(height: 24),
 
-                GestureDetector(
-                  onTap: () => _showEditBudgetDialog(context),
-                  child: GlassCard(
-                    gradientColors: isDark
-                        ? [
-                            AppColors.primaryPurple.withOpacity(0.25),
-                            AppColors.electricBlue.withOpacity(0.05),
-                          ]
-                        : null,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  "THIS MONTH'S SPEND",
-                                  style: AppTextStyles.caption(isDark: isDark).copyWith(
-                                    letterSpacing: 1.0,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '₹${currentMonthSpent.toStringAsFixed(2)}',
-                                  style: AppTextStyles.heading1(isDark: isDark).copyWith(
-                                    fontSize: 30,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            GestureDetector(
-                              onTap: _showResetDayDialog,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                Row(
+                  children: [
+                    // Box 1: Today's Spend
+                    Expanded(
+                      child: BouncyGestureDetector(
+                        onTap: () => ref.read(dashboardIndexProvider.notifier).state = 1,
+                        child: _buildSolidCard(
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.08),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.white.withOpacity(0.05)),
+                                  shape: BoxShape.circle,
+                                  color: AppColors.electricBlue.withValues(alpha: isDark ? 0.15 : 0.08),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.calendar_month_rounded, color: AppColors.electricBlue, size: 14),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'Reset: Day $resetDay',
-                                      style: TextStyle(
-                                        color: isDark ? Colors.white : Colors.black87,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
+                                child: const Icon(
+                                  Icons.today_rounded,
+                                  color: AppColors.electricBlue,
+                                  size: 18,
                                 ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 8),
+                              Text(
+                                'Today',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '₹${todaySpent.toStringAsFixed(0)}',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 24),
-                        GradientProgressBar(progress: progress),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Remaining Budget: ₹${remaining.toStringAsFixed(0)}',
-                              style: AppTextStyles.bodySmall(isDark: isDark),
-                            ),
-                            Text(
-                              'Budget Limit: ₹${budget.monthlyIncome.toStringAsFixed(0)}',
-                              style: AppTextStyles.bodySmall(isDark: isDark),
-                            ),
-                          ],
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    // Box 2: This Month's Spend
+                    Expanded(
+                      child: BouncyGestureDetector(
+                        onTap: () => ref.read(dashboardIndexProvider.notifier).state = 1,
+                        child: _buildSolidCard(
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: AppColors.primaryPurple.withValues(alpha: isDark ? 0.15 : 0.08),
+                                ),
+                                child: const Icon(
+                                  Icons.calendar_month_rounded,
+                                  color: AppColors.primaryPurple,
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'This Month',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '₹${currentMonthSpent.toStringAsFixed(0)}',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Box 3: You Owe
+                    Expanded(
+                      child: BouncyGestureDetector(
+                        onTap: () => Navigator.push(
+                          context,
+                          AppPageRoute(
+                            page: const OweDetailsScreen(),
+                            type: RouteTransitionType.slideRight,
+                          ),
+                        ),
+                        child: _buildSolidCard(
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: AppColors.accentPink.withValues(alpha: isDark ? 0.15 : 0.08),
+                                ),
+                                child: const Icon(
+                                  Icons.money_off_rounded,
+                                  color: AppColors.accentPink,
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'You Owe',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '₹${totalOwed.toStringAsFixed(0)}',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 
                 const SizedBox(height: 24),
@@ -612,42 +776,46 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                GridView.count(
-                  crossAxisCount: 4,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                  childAspectRatio: 0.8,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildQuickAction(
-                      icon: Icons.add_rounded,
-                      label: 'Add Expense',
-                      color: AppColors.primaryPurple,
-                      onTap: () => Navigator.push(
-                        context,
-                        AppPageRoute(page: const AddExpenseScreen()),
+                    Expanded(
+                      child: _buildQuickAction(
+                        icon: Icons.add_rounded,
+                        label: 'Add Expense',
+                        color: AppColors.primaryPurple,
+                        onTap: () => Navigator.push(
+                          context,
+                          AppPageRoute(page: const AddExpenseScreen()),
+                        ),
                       ),
                     ),
-                    _buildQuickAction(
-                      icon: Icons.qr_code_scanner_rounded,
-                      label: 'Scan Receipt',
-                      color: AppColors.electricBlue,
-                      onTap: _triggerOcrScan,
+                    Expanded(
+                      child: _buildQuickAction(
+                        icon: Icons.qr_code_scanner_rounded,
+                        label: 'Scan Receipt',
+                        color: AppColors.electricBlue,
+                        onTap: _triggerOcrScan,
+                      ),
                     ),
-                    _buildQuickAction(
-                      icon: Icons.group_add_rounded,
-                      label: 'Create Group',
-                      color: AppColors.accentOrange,
-                      onTap: _showCreateGroupSheet,
+                    Expanded(
+                      child: _buildQuickAction(
+                        icon: Icons.analytics_rounded,
+                        label: 'Charts',
+                        color: AppColors.accentOrange,
+                        onTap: () => ref.read(dashboardIndexProvider.notifier).state = 1,
+                      ),
                     ),
-                    _buildQuickAction(
-                      icon: Icons.history_edu_rounded,
-                      label: 'History',
-                      color: AppColors.emeraldGreen,
-                      onTap: () => Navigator.push(
-                        context,
-                        AppPageRoute(page: const ExpenseHistoryScreen(), type: RouteTransitionType.slideRight),
+                    Expanded(
+                      child: _buildQuickAction(
+                        icon: Icons.history_edu_rounded,
+                        label: 'History',
+                        color: AppColors.emeraldGreen,
+                        onTap: () => Navigator.push(
+                          context,
+                          AppPageRoute(page: const ExpenseHistoryScreen(), type: RouteTransitionType.slideRight),
+                        ),
                       ),
                     ),
                   ],
@@ -665,6 +833,23 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                         letterSpacing: 1.0,
                       ),
                     ),
+                    TextButton.icon(
+                      onPressed: _showCreateGroupSheet,
+                      icon: const Icon(Icons.add_rounded, size: 16, color: AppColors.primaryPurple),
+                      label: const Text(
+                        'Create Group',
+                        style: TextStyle(
+                          color: AppColors.primaryPurple,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -679,7 +864,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                         ),
                       )
                     : SizedBox(
-                        height: 110,
+                        height: 120,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: groups.length,
@@ -698,46 +883,56 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                                 ),
                               ),
                               child: SizedBox(
-                                width: 160,
-                                child: GlassCard(
+                                width: 144,
+                                child: _buildSolidCard(
                                   padding: const EdgeInsets.all(12),
+                                  borderRadius: 20,
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Text(
-                                        group.name,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: isDark ? Colors.white : Colors.black87,
-                                          fontSize: 14,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${group.memberNames.length} members',
-                                        style: TextStyle(
-                                          color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
-                                          fontSize: 11,
-                                        ),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: AppColors.primaryPurple.withValues(alpha: isDark ? 0.15 : 0.08),
+                                            ),
+                                            child: const Icon(
+                                              Icons.group_rounded,
+                                              color: AppColors.primaryPurple,
+                                              size: 16,
+                                            ),
+                                          ),
+                                          Icon(
+                                            Icons.arrow_forward_rounded,
+                                            size: 14,
+                                            color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                                          ),
+                                        ],
                                       ),
                                       const SizedBox(height: 8),
-                                      Row(
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Icon(
-                                            Icons.chevron_right_rounded,
-                                            size: 14,
-                                            color: isDark ? AppColors.electricBlue : AppColors.primaryPurple,
-                                          ),
-                                          const SizedBox(width: 4),
                                           Text(
-                                            'View Details',
-                                            style: TextStyle(
-                                              color: isDark ? AppColors.electricBlue : AppColors.primaryPurple,
-                                              fontSize: 11,
+                                            group.name,
+                                            style: GoogleFonts.inter(
                                               fontWeight: FontWeight.bold,
+                                              color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                                              fontSize: 13,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${group.memberNames.length} members',
+                                            style: GoogleFonts.inter(
+                                              color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                                              fontSize: 10.5,
                                             ),
                                           ),
                                         ],
@@ -766,112 +961,110 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                GlassCard(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: sortedCategories.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 16.0),
-                            child: Center(
+                _buildSolidCard(
+                  padding: const EdgeInsets.all(16.0),
+                  child: sortedCategories.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16.0),
+                          child: Center(
+                            child: Column(
+                              children: [
+                                Icon(Icons.pie_chart_outline_rounded,
+                                    color: isDark
+                                        ? AppColors.textSecondaryDark
+                                        : AppColors.textSecondaryLight,
+                                    size: 32),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'No spending in the current cycle yet.',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? AppColors.textSecondaryDark
+                                        : AppColors.textSecondaryLight,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: sortedCategories.take(3).map((entry) {
+                            final cat = entry.key;
+                            final amt = entry.value;
+                            final pct = currentMonthSpent > 0 ? amt / currentMonthSpent : 0.0;
+                            
+                            final barColors = [
+                              AppColors.primaryPurple,
+                              AppColors.electricBlue,
+                              AppColors.emeraldGreen,
+                              AppColors.accentOrange,
+                              AppColors.accentPink,
+                            ];
+                            
+                            final idx = sortedCategories.indexOf(entry);
+                            final barColor = barColors[idx % barColors.length];
+
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8.0),
                               child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Icon(Icons.pie_chart_outline_rounded,
-                                      color: isDark
-                                          ? AppColors.textSecondaryDark
-                                          : AppColors.textSecondaryLight,
-                                      size: 32),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'No spending in the current cycle yet.',
-                                    style: TextStyle(
-                                      color: isDark
-                                          ? AppColors.textSecondaryDark
-                                          : AppColors.textSecondaryLight,
-                                      fontSize: 12,
+                                  Row(
+                                    children: [
+                                      Text(getCategoryEmoji(cat),
+                                          style: const TextStyle(fontSize: 16)),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          cat,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        '₹${amt.toStringAsFixed(2)}',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '(${(pct * 100).toStringAsFixed(0)}%)',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isDark
+                                              ? AppColors.textSecondaryDark
+                                              : AppColors.textSecondaryLight,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: pct,
+                                      backgroundColor: isDark
+                                          ? Colors.white.withOpacity(0.06)
+                                          : Colors.black.withOpacity(0.04),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        barColor,
+                                      ),
+                                      minHeight: 6,
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                          )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: sortedCategories.take(3).map((entry) {
-                              final cat = entry.key;
-                              final amt = entry.value;
-                              final pct = currentMonthSpent > 0 ? amt / currentMonthSpent : 0.0;
-                              
-                              final barColors = [
-                                AppColors.primaryPurple,
-                                AppColors.electricBlue,
-                                AppColors.emeraldGreen,
-                                AppColors.accentOrange,
-                                AppColors.accentPink,
-                              ];
-                              
-                              final idx = sortedCategories.indexOf(entry);
-                              final barColor = barColors[idx % barColors.length];
-
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Text(getCategoryEmoji(cat),
-                                            style: const TextStyle(fontSize: 16)),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            cat,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w600,
-                                              color: isDark ? Colors.white : Colors.black87,
-                                            ),
-                                          ),
-                                        ),
-                                        Text(
-                                          '₹${amt.toStringAsFixed(2)}',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold,
-                                            color: isDark ? Colors.white : Colors.black87,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          '(${(pct * 100).toStringAsFixed(0)}%)',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: isDark
-                                                ? AppColors.textSecondaryDark
-                                                : AppColors.textSecondaryLight,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 6),
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: LinearProgressIndicator(
-                                        value: pct,
-                                        backgroundColor: isDark
-                                            ? Colors.white10
-                                            : Colors.black12,
-                                        valueColor: AlwaysStoppedAnimation<Color>(
-                                          barColor,
-                                        ),
-                                        minHeight: 6,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                  ),
+                            );
+                          }).toList(),
+                        ),
                 ),
 
                 const SizedBox(height: 28),
@@ -897,7 +1090,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                 ),
                 
                 txs.isEmpty
-                    ? Padding(
+                    ? _buildSolidCard(
                         padding: const EdgeInsets.symmetric(vertical: 24),
                         child: Center(
                           child: Text(
@@ -910,18 +1103,24 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                           ),
                         ),
                       )
-                    : ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: txs.length > 5 ? 5 : txs.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          final tx = txs[index];
-                          return StaggeredListItem(
-                            index: index,
-                            child: _buildTransactionCard(tx, isDark),
-                          );
-                        },
+                    : _buildSolidCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: txs.length > 5 ? 5 : txs.length,
+                          separatorBuilder: (_, __) => Divider(
+                            color: isDark ? Colors.white.withOpacity(0.06) : AppColors.borderLight,
+                            height: 1,
+                          ),
+                          itemBuilder: (context, index) {
+                            final tx = txs[index];
+                            return StaggeredListItem(
+                              index: index,
+                              child: _buildTransactionCard(tx, isDark),
+                            );
+                          },
+                        ),
                       ),
               ],
             ),
@@ -939,34 +1138,41 @@ class _HomeTabState extends ConsumerState<HomeTab> {
     required VoidCallback onTap,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return GestureDetector(
+    return BouncyGestureDetector(
       onTap: onTap,
-      child: GlassCard(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        borderRadius: 16,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: color.withOpacity(0.15),
-              ),
-              child: Icon(icon, color: color, size: 22),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color.withValues(alpha: isDark ? 0.15 : 0.08),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: isDark ? 0.1 : 0.03),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white : AppColors.textPrimaryLight,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -976,15 +1182,14 @@ class _HomeTabState extends ConsumerState<HomeTab> {
     final textColor = isDark ? Colors.white : AppColors.textPrimaryLight;
     final subColor = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      borderRadius: 16,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.primaryPurple.withValues(alpha: 0.12),
+              color: AppColors.primaryPurple.withValues(alpha: isDark ? 0.15 : 0.08),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(getCategoryEmoji(tx.category), style: const TextStyle(fontSize: 18)),
@@ -1004,7 +1209,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: AppColors.primaryPurple.withValues(alpha: 0.1),
+                        color: AppColors.primaryPurple.withValues(alpha: isDark ? 0.15 : 0.08),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(tx.category, style: TextStyle(color: AppColors.primaryPurple, fontSize: 9, fontWeight: FontWeight.w600)),
@@ -1048,7 +1253,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                       child: Container(
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: AppColors.electricBlue.withValues(alpha: 0.1),
+                          color: AppColors.electricBlue.withValues(alpha: isDark ? 0.15 : 0.08),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Icon(Icons.edit_rounded, color: AppColors.electricBlue, size: 13),
@@ -1057,7 +1262,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                     const SizedBox(width: 6),
                     GestureDetector(
                       onTap: () {
-                        showDialog(
+                        showAnimatedDialog(
                           context: context,
                           builder: (_) => AlertDialog(
                             backgroundColor: isDark ? AppColors.cardDark : Colors.white,
@@ -1084,7 +1289,7 @@ class _HomeTabState extends ConsumerState<HomeTab> {
                       child: Container(
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: Colors.redAccent.withValues(alpha: 0.1),
+                          color: Colors.redAccent.withValues(alpha: isDark ? 0.15 : 0.08),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 13),
@@ -1324,6 +1529,33 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                     final res = _searchResults[index];
                     final isAlreadyAdded = _selectedFriends.any((m) => m['uid'] == res['uid']);
                     return ListTile(
+                      leading: Builder(
+                        builder: (context) {
+                          final photoUrl = res['photoUrl'] as String?;
+                          final gender = res['user_gender'] as String? ?? 'male';
+                          if (photoUrl != null && photoUrl.startsWith('data:image')) {
+                            try {
+                              final base64String = photoUrl.split('base64,').last;
+                              return CircleAvatar(
+                                radius: 20,
+                                backgroundImage: MemoryImage(base64Decode(base64String)),
+                                backgroundColor: Colors.transparent,
+                              );
+                            } catch (_) {}
+                          } else if (photoUrl != null && photoUrl.startsWith('http')) {
+                            return CircleAvatar(
+                              radius: 20,
+                              backgroundImage: NetworkImage(photoUrl),
+                              backgroundColor: Colors.transparent,
+                            );
+                          }
+                          return CircleAvatar(
+                            radius: 20,
+                            backgroundImage: AssetImage(gender == 'female' ? 'assets/images/avatar_girl.png' : 'assets/images/avatar_boy.png'),
+                            backgroundColor: Colors.transparent,
+                          );
+                        },
+                      ),
                       title: Text(res['displayName'] ?? '', style: const TextStyle(color: Colors.white)),
                       subtitle: Text(res['email'] ?? '', style: const TextStyle(color: AppColors.textSecondaryDark, fontSize: 12)),
                       trailing: isAlreadyAdded
@@ -1406,7 +1638,7 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
 
   void _showErrorDialog(String message) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    showDialog(
+    showAnimatedDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: isDark ? AppColors.cardDark : Colors.white,
@@ -2243,6 +2475,71 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class BouncyGestureDetector extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+
+  const BouncyGestureDetector({
+    super.key,
+    required this.child,
+    required this.onTap,
+  });
+
+  @override
+  State<BouncyGestureDetector> createState() => _BouncyGestureDetectorState();
+}
+
+class _BouncyGestureDetectorState extends State<BouncyGestureDetector>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 140),
+    );
+    _scale = Tween<double>(begin: 1.0, end: 0.88).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onTapDown(TapDownDetails details) {
+    _controller.forward();
+  }
+
+  void _onTapUp(TapUpDetails details) {
+    _controller.reverse();
+    widget.onTap();
+  }
+
+  void _onTapCancel() {
+    _controller.reverse();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: _onTapDown,
+      onTapUp: _onTapUp,
+      onTapCancel: _onTapCancel,
+      behavior: HitTestBehavior.opaque,
+      child: ScaleTransition(
+        scale: _scale,
+        child: widget.child,
       ),
     );
   }
