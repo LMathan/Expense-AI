@@ -11,9 +11,9 @@ class NotificationService {
 
     const DarwinInitializationSettings initializationSettingsDarwin =
         DarwinInitializationSettings(
-      requestAlertPermission: false,
-      requestBadgePermission: false,
-      requestSoundPermission: false,
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
     );
 
     const InitializationSettings initializationSettings = InitializationSettings(
@@ -38,7 +38,15 @@ class NotificationService {
       importance: Importance.max,
       priority: Priority.high,
     );
-    const NotificationDetails dailyDetails = NotificationDetails(android: androidDailyDetails);
+    const DarwinNotificationDetails iosDailyDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    const NotificationDetails dailyDetails = NotificationDetails(
+      android: androidDailyDetails,
+      iOS: iosDailyDetails,
+    );
     
     await _localNotificationsPlugin.periodicallyShow(
       101,
@@ -57,7 +65,15 @@ class NotificationService {
       importance: Importance.max,
       priority: Priority.high,
     );
-    const NotificationDetails weeklyDetails = NotificationDetails(android: androidWeeklyDetails);
+    const DarwinNotificationDetails iosWeeklyDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    const NotificationDetails weeklyDetails = NotificationDetails(
+      android: androidWeeklyDetails,
+      iOS: iosWeeklyDetails,
+    );
 
     await _localNotificationsPlugin.periodicallyShow(
       102,
@@ -77,7 +93,15 @@ class NotificationService {
       importance: Importance.max,
       priority: Priority.high,
     );
-    const NotificationDetails details = NotificationDetails(android: androidDetails);
+    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    const NotificationDetails details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
     
     await _localNotificationsPlugin.show(
       DateTime.now().millisecond,

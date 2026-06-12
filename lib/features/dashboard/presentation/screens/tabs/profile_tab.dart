@@ -81,15 +81,26 @@ class _ProfileTabState extends ConsumerState<ProfileTab> {
           child: Column(
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                width: 72,
+                height: 72,
+                padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  gradient: AppColors.primaryGradient,
+                  color: isDark ? AppColors.cardDark : Colors.white,
                   shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                child: const Icon(
-                  Icons.account_balance_wallet_rounded,
-                  color: Colors.white,
-                  size: 28,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(36),
+                  child: Image.asset(
+                    'assets/images/logo.png',
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),

@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:hive/hive.dart';
 import 'package:espenseai/core/constants/colors.dart';
 import 'package:espenseai/core/services/firestore_sync_service.dart';
+import 'package:espenseai/core/services/notification_service.dart';
 import 'package:espenseai/core/storage/hive_helper.dart';
 import 'package:espenseai/features/expense/presentation/providers/expense_provider.dart';
 import 'package:espenseai/core/widgets/vector_illustrations.dart';
@@ -92,6 +93,13 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
     }
 
     ref.read(groupsProvider.notifier).addGroup(name, _selectedMembers);
+    
+    // Trigger notification
+    ref.read(notificationServiceProvider).showInstantNotification(
+      'Group Created! 👥',
+      'You were added to the "$name" group.',
+    );
+
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:espenseai/core/constants/colors.dart';
 import 'package:espenseai/core/constants/text_styles.dart';
+import 'package:espenseai/core/services/notification_service.dart';
 import 'package:espenseai/core/widgets/glass_card.dart';
 import 'package:espenseai/core/widgets/gradient_progress_bar.dart';
 import 'package:espenseai/core/widgets/interactive_chart.dart';
@@ -1379,6 +1380,7 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
   
   String _splitType = 'Equally';
   Map<String, double> _unequalShares = {};
+  DateTime _selectedDate = DateTime.now();
 
   @override
   void initState() {
@@ -1747,7 +1749,7 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
       merchant: desc.startsWith('Split:') ? desc : 'Split: $desc (${widget.group.name})',
       notes: 'Total: ₹$amount. Paid by $_whoPaidName. Split $_splitType in group ${widget.group.name}.',
       paymentMethod: _paymentMethod,
-      date: DateTime.now(),
+      date: _selectedDate,
       splitWith: otherEmails,
       isSettled: false,
       paidByEmail: paidByEmail,
@@ -1755,6 +1757,20 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
       groupId: widget.group.id,
       splitShares: splitShares,
     );
+
+    // Trigger notification
+    if (paidByEmail == (currentUser?.email ?? '')) {
+      final othersOwe = amount - myShare;
+      ref.read(notificationServiceProvider).showInstantNotification(
+        'New Split Added 💸',
+        'You paid ₹${amount.toStringAsFixed(0)} in "${widget.group.name}" for $_category. Others owe you ₹${othersOwe.toStringAsFixed(0)}.',
+      );
+    } else {
+      ref.read(notificationServiceProvider).showInstantNotification(
+        'New Split in ${widget.group.name} 💸',
+        'You need to pay ₹${myShare.toStringAsFixed(0)} in split for $_category.',
+      );
+    }
 
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1948,6 +1964,87 @@ class _AddGroupExpenseSheetState extends ConsumerState<AddGroupExpenseSheet> {
                   });
                 }
               },
+            ),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () async {
+                final date = await showDatePicker(
+                  context: context,
+                  initialDate: _selectedDate,
+                  firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                  lastDate: DateTime.now(),
+                  builder: (context, child) {
+                    return Theme(
+                      data: Theme.of(context).copyWith(
+                        colorScheme: isDark
+                            ? const ColorScheme.dark(
+                                primary: AppColors.primaryPurple,
+                                onPrimary: Colors.white,
+                                surface: AppColors.cardDark,
+                                onSurface: Colors.white,
+                              )
+                            : const ColorScheme.light(
+                                primary: AppColors.primaryPurple,
+                                onPrimary: Colors.white,
+                                surface: Colors.white,
+                                onSurface: Colors.black87,
+                              ),
+                      ),
+                      child: child!,
+                    );
+                  },
+                );
+                if (date != null) {
+                  setState(() {
+                    _selectedDate = date;
+                  });
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.calendar_month_rounded,
+                      color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Transaction Date',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            DateFormat('dd MMM yyyy').format(_selectedDate),
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                              color: isDark ? Colors.white : AppColors.textPrimaryLight,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(
+                      Icons.edit_calendar_rounded,
+                      color: AppColors.primaryPurple,
+                      size: 18,
+                    ),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             Row(

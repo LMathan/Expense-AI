@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:espenseai/core/services/notification_service.dart';
 import 'package:espenseai/core/constants/colors.dart';
 import 'package:espenseai/core/constants/text_styles.dart';
 import 'package:espenseai/core/widgets/glass_card.dart';
@@ -80,6 +81,13 @@ class _GroupDetailsScreenState extends ConsumerState<GroupDetailsScreen> {
 
   void _addFriend(GroupModel group, Map<String, dynamic> user) async {
     await ref.read(groupsProvider.notifier).addMemberToGroup(group.id, user);
+    
+    // Trigger notification
+    ref.read(notificationServiceProvider).showInstantNotification(
+      'Group Updated 👥',
+      'You added ${user['displayName']} to the group "${group.name}".',
+    );
+
     setState(() {
       _searchController.clear();
       _searchResults = [];

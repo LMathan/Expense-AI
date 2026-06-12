@@ -78,17 +78,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     await notificationService.init();
 
     final status = await Permission.notification.status;
-    if (status.isDenied) {
+    if (!status.isGranted) {
       if (mounted) {
-        _showNotificationPermissionRationaleDialog();
+        _showNotificationPermissionRationaleDialog(status);
       }
-    } else if (status.isGranted) {
+    } else {
       await notificationService.scheduleReminders();
     }
   }
 
-  void _showNotificationPermissionRationaleDialog() {
+  void _showNotificationPermissionRationaleDialog(PermissionStatus currentStatus) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isPermanentlyDenied = currentStatus.isPermanentlyDenied;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -123,7 +124,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             ),
             const SizedBox(height: 12),
             Text(
-              'Allow notifications to receive daily reminders to log your expenses and timely alerts on your budget status.',
+              isPermanentlyDenied
+                  ? 'Notification permissions are disabled. Please enable them in settings to receive log reminders and transaction updates.'
+                  : 'Allow notifications to receive daily reminders to log your expenses and timely alerts on your budget status.',
               style: GoogleFonts.inter(
                 fontSize: 14,
                 color: isDark ? Colors.white70 : Colors.black54,
@@ -155,9 +158,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 child: ElevatedButton(
                   onPressed: () async {
                     Navigator.pop(ctx);
-                    final result = await Permission.notification.request();
-                    if (result.isGranted) {
-                      await ref.read(notificationServiceProvider).scheduleReminders();
+                    if (isPermanentlyDenied) {
+                      await openAppSettings();
+                    } else {
+                      final result = await Permission.notification.request();
+                      if (result.isGranted) {
+                        await ref.read(notificationServiceProvider).scheduleReminders();
+                      }
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -168,7 +175,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: const Text('Allow'),
+                  child: Text(isPermanentlyDenied ? 'Open Settings' : 'Allow'),
                 ),
               ),
             ],
